@@ -85,7 +85,7 @@ fn default_path() -> String { "/brew/".into() }
 fn default_ca_path() -> PathBuf { "/etc/ssl/certs/ca-certificates.crt".into() }
 fn default_reconnect() -> u64 { 5 }
 fn default_operator_issi() -> u32 { 9_990_001 }
-fn default_listen() -> String { "0.0.0.0:8080".into() }
+fn default_listen() -> String { "0.0.0.0:8443".into() }
 
 impl Default for DispatchConfig {
     fn default() -> Self {
@@ -149,7 +149,7 @@ mod tests {
         let text = include_str!("../tetra-dispatch.toml");
         let cfg: Config = toml::from_str(text).unwrap();
         cfg.validate().unwrap();
-        assert_eq!(cfg.web.listen, "0.0.0.0:8080");
+        assert_eq!(cfg.web.listen, "0.0.0.0:8443");
     }
 
     #[test]

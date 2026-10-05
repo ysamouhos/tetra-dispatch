@@ -28,7 +28,7 @@ priority = 0
 [web]
 # Browsers allow the microphone only on https:// or http://localhost: enable
 # `tls` (or use a TLS reverse proxy) for use from other machines.
-listen = "0.0.0.0:8080"
+listen = "0.0.0.0:8443"
 tls = false
 # PEM certificate chain and private key, e.g. a self-signed pair:
 #   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \

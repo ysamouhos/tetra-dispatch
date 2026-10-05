@@ -1,5 +1,7 @@
 # Tetra Dispatch
 
+- **What's new:** see [CHANGELOG.md](CHANGELOG.md)
+
 Browser TETRA dispatch console that connects **directly to a
 [brew-server](https://github.com/ysamouhos/brew-server)**. It logs in the
 same way a Basestation does (Brew discovery, Digest auth, WebSocket), then
@@ -20,6 +22,8 @@ stays where it is, for cell-local dispatch without a Brew network.
 - **Private calls**: you can make and answer duplex or simplex calls to any
   ISSI the brew-server can reach.
 - **SDS**: sends and receives text messages (SDS-TL, protocol 0x82).
+- **HTTPS console**: optional built-in TLS (`[web] tls`), so browsers allow the
+  microphone without a reverse proxy.
 - **One operator at a time**: one browser takes the operator position. Other
   browsers can watch the same status, activity and SDS log.
 
@@ -36,12 +40,13 @@ cargo build --release
 ./target/release/tetra-dispatch tetra-dispatch.toml
 ```
 
-Then open `http://<host>:8080/`.
+Then open `http://<host>:8443/` (or `https://` with `tls = true`). The console
+listens on port 8443 by default (`[web] listen`).
 
 Browsers only allow microphone access on `https://` or `http://localhost`.
 For use from other machines, serve the console over HTTPS. Set `tls = true`
 in `[web]` and point `tls_cert_path` / `tls_key_path` at a PEM certificate
-and key, then open `https://<host>:8080/`. A self-signed pair works; each
+and key, then open `https://<host>:8443/`. A self-signed pair works; each
 browser has to accept it once:
 
 ```bash
@@ -81,6 +86,7 @@ and `tls_pinned_cert_path` to a copy of its `server.crt`.
 | `src/sds.rs` | SDS text encode/decode |
 | `src/web.rs` | Console HTTP and WebSocket (JSON commands, binary PCM) |
 | `static/index.html` | The console (ES/EN, light/dark) |
+| `tetra-dispatch.toml` | Example configuration |
 
 ```bash
 cargo test
