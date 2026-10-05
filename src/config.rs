@@ -71,6 +71,14 @@ pub struct WebConfig {
     /// Optional console password (HTTP Basic, any user name). Empty = open.
     #[serde(default)]
     pub password: String,
+    /// Serve the console over HTTPS (needed for the microphone off localhost).
+    #[serde(default)]
+    pub tls: bool,
+    /// PEM certificate chain and private key for `tls`.
+    #[serde(default)]
+    pub tls_cert_path: PathBuf,
+    #[serde(default)]
+    pub tls_key_path: PathBuf,
 }
 
 fn default_path() -> String { "/brew/".into() }
@@ -87,7 +95,13 @@ impl Default for DispatchConfig {
 
 impl Default for WebConfig {
     fn default() -> Self {
-        Self { listen: default_listen(), password: String::new() }
+        Self {
+            listen: default_listen(),
+            password: String::new(),
+            tls: false,
+            tls_cert_path: PathBuf::new(),
+            tls_key_path: PathBuf::new(),
+        }
     }
 }
 
@@ -116,6 +130,9 @@ impl Config {
         if self.dispatch.tx_group != 0 && !valid_ssi(self.dispatch.tx_group) {
             anyhow::bail!("dispatch.tx_group: invalid GSSI {}", self.dispatch.tx_group);
         }
+        if self.web.tls && (self.web.tls_cert_path.as_os_str().is_empty() || self.web.tls_key_path.as_os_str().is_empty()) {
+            anyhow::bail!("web.tls needs web.tls_cert_path and web.tls_key_path");
+        }
         if self.brew.username.is_empty() != self.brew.password.is_empty() {
             anyhow::bail!("brew.username and brew.password go together");
         }
@@ -141,5 +158,12 @@ mod tests {
         cfg.validate().unwrap();
         assert_eq!(cfg.brew.path, "/brew/");
         assert_eq!(cfg.dispatch.operator_issi, 9_990_001);
+        assert!(!cfg.web.tls);
+    }
+
+    #[test]
+    fn web_tls_needs_cert_and_key() {
+        let cfg: Config = toml::from_str("[brew]\nhost = \"h:9000\"\n[web]\ntls = true\ntls_cert_path = \"c.pem\"\n").unwrap();
+        assert!(cfg.validate().is_err());
     }
 }

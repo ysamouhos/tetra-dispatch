@@ -11,12 +11,15 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
+use axum_server::tls_rustls::RustlsConfig;
+use anyhow::Context;
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{info, warn};
 
+use crate::config::WebConfig;
 use crate::dispatcher::{ClientId, Event, UiCmd, UiOut};
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
@@ -31,17 +34,32 @@ struct AppState {
     next_id: Arc<AtomicU64>,
 }
 
-pub async fn run(listen: String, password: String, events: mpsc::Sender<Event>, ui: broadcast::Sender<UiOut>) -> anyhow::Result<()> {
-    let state = AppState { events, ui, password: Arc::new(password), next_id: Arc::new(AtomicU64::new(1)) };
+pub async fn run(cfg: WebConfig, events: mpsc::Sender<Event>, ui: broadcast::Sender<UiOut>) -> anyhow::Result<()> {
+    let state = AppState { events, ui, password: Arc::new(cfg.password.clone()), next_id: Arc::new(AtomicU64::new(1)) };
     let app = Router::new()
         .route("/", get(index))
         .route("/ws", get(ws_upgrade))
         .route("/healthz", get(|| async { "ok\n" }))
         .with_state(state);
-    let listener = tokio::net::TcpListener::bind(&listen).await
-        .map_err(|e| anyhow::anyhow!("binding console on {listen}: {e}"))?;
-    info!("console on http://{listen}/");
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
+    let listen = &cfg.listen;
+    if cfg.tls {
+        let tls = RustlsConfig::from_pem_file(&cfg.tls_cert_path, &cfg.tls_key_path).await
+            .with_context(|| format!("loading console TLS cert {} and key {}", cfg.tls_cert_path.display(), cfg.tls_key_path.display()))?;
+        let addr: SocketAddr = tokio::net::lookup_host(listen).await
+            .with_context(|| format!("resolving web.listen {listen}"))?
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("web.listen {listen} resolves to nothing"))?;
+        info!("console on https://{listen}/");
+        axum_server::bind_rustls(addr, tls)
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+            .with_context(|| format!("serving console on {listen}"))?;
+    } else {
+        let listener = tokio::net::TcpListener::bind(listen).await
+            .with_context(|| format!("binding console on {listen}"))?;
+        info!("console on http://{listen}/");
+        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
+    }
     Ok(())
 }
 

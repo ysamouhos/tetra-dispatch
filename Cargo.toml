@@ -8,6 +8,7 @@ description = "Browser TETRA dispatch console that connects directly to a brew-s
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
 base64 = "0.22"
 futures-util = "0.3"
 md5 = "0.7"

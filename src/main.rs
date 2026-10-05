@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     tokio::select! {
-        r = web::run(cfg.web.listen.clone(), cfg.web.password.clone(), events_tx, ui_tx) => r,
+        r = web::run(cfg.web.clone(), events_tx, ui_tx) => r,
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("shutting down");
             Ok(())

@@ -39,8 +39,19 @@ cargo build --release
 Then open `http://<host>:8080/`.
 
 Browsers only allow microphone access on `https://` or `http://localhost`.
-For use from other machines, put the console behind a TLS reverse proxy
-(nginx, Caddy, …) that forwards `/` and the `/ws` WebSocket.
+For use from other machines, serve the console over HTTPS. Set `tls = true`
+in `[web]` and point `tls_cert_path` / `tls_key_path` at a PEM certificate
+and key, then open `https://<host>:8080/`. A self-signed pair works; each
+browser has to accept it once:
+
+```bash
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
+  -subj "/CN=tetra-dispatch" -addext "subjectAltName=IP:192.168.1.10,DNS:dispatch.local" \
+  -keyout key.pem -out cert.pem
+```
+
+A TLS reverse proxy (nginx, Caddy, …) forwarding `/` and the `/ws`
+WebSocket works too.
 
 ## brew-server side
 
