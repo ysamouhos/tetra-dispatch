@@ -1,0 +1,33 @@
+# Tetra Dispatch — browser dispatch console for a brew-server network.
+
+[brew]
+# brew-server Brew listener (its `listen`), and the discovery path (its `websocket_path`).
+host = "127.0.0.1:9000"
+path = "/brew/"
+# Set when the brew-server has `[tls] enabled = true`. A self-signed brew-server
+# certificate is trusted with `tls_pinned_cert_path` (a copy of its server.crt).
+tls = false
+# tls_server_name = "brew.example.org"
+# tls_ca_path = "/etc/ssl/certs/ca-certificates.crt"
+# tls_pinned_cert_path = "/etc/tetra-dispatch/brew-server.crt"
+# Credentials from brew-server `[auth.users]` (numeric, up to 7 digits).
+# Leave empty when the brew-server has `[auth] enabled = false`.
+username = ""
+password = ""
+reconnect_seconds = 5
+
+[dispatch]
+# ISSI the console registers as on the Brew network.
+operator_issi = 9990001
+# Talkgroups listened to on start; the console can change the list.
+groups = []
+# Talkgroup PTT transmits on (0 = the first of `groups`).
+tx_group = 0
+priority = 0
+
+[web]
+# Browsers allow the microphone only on https:// or http://localhost:
+# put the console behind a TLS reverse proxy for use from other machines.
+listen = "0.0.0.0:8080"
+# Optional console password (HTTP Basic, any user name). Empty = open.
+password = ""

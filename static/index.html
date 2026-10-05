@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tetra Dispatch</title>
+<style>
+:root{
+  --bg:#f4f5f7;--card:#fff;--fg:#1c2330;--muted:#677185;--line:#dde1e8;
+  --accent:#1f6feb;--ok:#1a7f37;--warn:#b35900;--bad:#c62828;--tx:#c62828;--rx:#1a7f37;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){--bg:#0f1318;--card:#171c23;--fg:#e4e8ee;--muted:#8b95a7;--line:#2a313b;
+    --accent:#4c8dff;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--tx:#f85149;--rx:#3fb950;}
+}
+:root[data-theme="dark"]{--bg:#0f1318;--card:#171c23;--fg:#e4e8ee;--muted:#8b95a7;--line:#2a313b;
+  --accent:#4c8dff;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--tx:#f85149;--rx:#3fb950;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}
+header h1{font-size:17px;margin:0;font-weight:650}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);font-size:13px;color:var(--muted)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}
+.on .dot{background:var(--ok)} .off .dot{background:var(--bad)}
+.grow{flex:1}
+main{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:14px;padding:14px 16px;max-width:1200px;margin:0 auto}
+@media (max-width:820px){main{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 10px}
+button{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.danger{background:var(--bad);border-color:var(--bad);color:#fff}
+button.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+button:disabled{opacity:.45;cursor:not-allowed}
+input,select{font:inherit;padding:7px 9px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg);min-width:0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row+.row{margin-top:8px}
+.muted{color:var(--muted)}
+.err{color:var(--bad);min-height:1.3em;margin-top:8px;font-size:14px}
+#ptt{display:block;width:100%;height:150px;margin-top:12px;border-radius:14px;font-size:22px;font-weight:700;letter-spacing:.04em;
+  user-select:none;-webkit-user-select:none;touch-action:none;border:2px solid var(--line)}
+#ptt.tx{background:var(--tx);border-color:var(--tx);color:#fff}
+#ptt.rx{border-color:var(--rx);color:var(--rx)}
+#ptt small{display:block;font-size:14px;font-weight:500;margin-top:6px;opacity:.85}
+.rxbar{margin-top:10px;padding:10px;border-radius:8px;border:1px dashed var(--line);min-height:44px;display:flex;align-items:center;gap:10px}
+.rxbar.live{border-style:solid;border-color:var(--rx)}
+.big{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums}
+table{width:100%;border-collapse:collapse}
+td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
+th{color:var(--muted);font-weight:500}
+.tg-tx{color:var(--accent);font-weight:650}
+.list{max-height:260px;overflow:auto}
+.msg{padding:6px 0;border-bottom:1px solid var(--line);font-size:14px}
+.msg .meta{color:var(--muted);font-size:12px}
+.callbox{margin-top:10px;padding:10px;border-radius:8px;background:var(--bg)}
+.span2{grid-column:1/-1}
+.hidden{display:none!important}
+.banner{padding:10px 16px;background:var(--warn);color:#fff;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>Tetra Dispatch</h1>
+  <span id="link" class="pill off"><span class="dot"></span><span id="link-text"></span></span>
+  <span class="pill"><span data-t="issi"></span>&nbsp;<b id="issi">—</b></span>
+  <span class="grow"></span>
+  <span id="opinfo" class="muted"></span>
+  <button id="claim" class="primary" data-t="claim"></button>
+  <button id="release" class="hidden" data-t="release"></button>
+  <select id="lang" aria-label="Language"><option value="es">ES</option><option value="en">EN</option></select>
+  <button id="theme" title="Theme">◐</button>
+</header>
+<div id="insecure" class="banner hidden" data-t="insecure"></div>
+<main>
+  <section class="card">
+    <h2 data-t="talk"></h2>
+    <div class="row">
+      <label class="muted" for="txsel" data-t="tx_group"></label>
+      <select id="txsel"></select>
+    </div>
+    <button id="ptt"><span data-t="ptt"></span><small id="ptt-sub"></small></button>
+    <div id="rxbar" class="rxbar"><span class="muted" data-t="no_rx"></span></div>
+    <div id="error" class="err"></div>
+  </section>
+
+  <section class="card">
+    <h2 data-t="private"></h2>
+    <div class="row">
+      <input id="dial" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI" style="width:140px">
+      <button id="call-duplex" class="ok" data-t="call_duplex"></button>
+      <button id="call-simplex" data-t="call_simplex"></button>
+    </div>
+    <div id="callbox" class="callbox hidden">
+      <div class="row"><span id="call-dir" class="muted"></span><b id="call-peer" class="big"></b><span id="call-kind" class="pill"></span></div>
+      <div class="row"><span id="call-phase"></span><span class="grow"></span><span id="call-timer" class="big"></span></div>
+      <div class="row">
+        <button id="answer" class="ok hidden" data-t="answer"></button>
+        <button id="hangup" class="danger" data-t="hangup"></button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 data-t="groups"></h2>
+    <table><thead><tr><th>GSSI</th><th data-t="listen"></th><th data-t="tx"></th><th></th></tr></thead><tbody id="tgs"></tbody></table>
+    <div class="row" style="margin-top:10px">
+      <input id="tg-new" type="number" min="1" max="16777214" inputmode="numeric" placeholder="GSSI" style="width:140px">
+      <button id="tg-add" data-t="add"></button>
+    </div>
+    <div class="row muted" id="active"></div>
+  </section>
+
+  <section class="card">
+    <h2>SDS</h2>
+    <div class="row">
+      <input id="sds-to" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI / GSSI" style="width:140px">
+      <input id="sds-text" class="grow" maxlength="250" data-tp="sds_text">
+      <button id="sds-send" class="primary" data-t="send"></button>
+    </div>
+    <div id="sds-list" class="list" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card span2">
+    <h2 data-t="activity"></h2>
+    <div id="log" class="list"></div>
+  </section>
+</main>
+<script>
+'use strict';
+const LANGS={
+  en:{issi:'ISSI',claim:'Take position',release:'Leave position',talk:'Talk',tx_group:'Transmit on',ptt:'PTT',
+    no_rx:'No traffic',private:'Private call',call_duplex:'Call (duplex)',call_simplex:'Call (simplex)',answer:'Answer',hangup:'Hang up',
+    groups:'Talkgroups',listen:'Listen',tx:'TX',add:'Add',send:'Send',sds_text:'Message',activity:'Activity',
+    connected:'Brew connected',disconnected:'Brew disconnected',connecting:'Connecting…',console_down:'Console offline',
+    operator:'Operator: ',you:'you',none:'none',busy_pos:'Another console holds the position',not_op:'Take the position first',
+    hold:'Hold to talk (or Space)',transmitting:'TRANSMITTING',on_tg:'on',listening:'Listening',peer_talking:'Peer talking',
+    outgoing:'Calling',incoming:'Incoming call from',dialing:'Dialing…',alerting:'Ringing at the radio…',ringing:'Ringing',
+    answering:'Connecting…',connected_call:'Connected',ended:'Call ended',failed:'Call failed',duplex:'duplex',simplex:'simplex',
+    remove:'Remove',active:'Active: ',preempt:'Busy — press again to transmit over it',mic_fail:'Microphone unavailable: ',
+    insecure:'The microphone needs https:// or localhost. Open the console through a TLS proxy.',
+    group_rx:'Group call',group_tx:'Dispatcher transmitted',link_up:'Brew link up',link_down:'Brew link down',
+    priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
+    delivered:'delivered',
+    causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
+      7:'incompatible',8:'service not supported',9:'pre-empted',10:'invalid identity',11:'SwMI disconnect',12:'no idle cc',
+      13:'timeout',14:'SwMI disconnect'}},
+  es:{issi:'ISSI',claim:'Tomar puesto',release:'Dejar puesto',talk:'Hablar',tx_group:'Transmitir en',ptt:'PTT',
+    no_rx:'Sin tráfico',private:'Llamada privada',call_duplex:'Llamar (dúplex)',call_simplex:'Llamar (símplex)',answer:'Contestar',hangup:'Colgar',
+    groups:'Grupos',listen:'Escuchar',tx:'TX',add:'Añadir',send:'Enviar',sds_text:'Mensaje',activity:'Actividad',
+    connected:'Brew conectado',disconnected:'Brew desconectado',connecting:'Conectando…',console_down:'Consola sin conexión',
+    operator:'Operador: ',you:'tú',none:'nadie',busy_pos:'Otra consola tiene el puesto',not_op:'Primero toma el puesto',
+    hold:'Mantén pulsado para hablar (o Espacio)',transmitting:'TRANSMITIENDO',on_tg:'en',listening:'Escuchando',peer_talking:'Habla el otro extremo',
+    outgoing:'Llamando a',incoming:'Llamada entrante de',dialing:'Marcando…',alerting:'Sonando en la radio…',ringing:'Sonando',
+    answering:'Conectando…',connected_call:'Conectada',ended:'Llamada finalizada',failed:'Llamada fallida',duplex:'dúplex',simplex:'símplex',
+    remove:'Quitar',active:'Activos: ',preempt:'Ocupado — pulsa otra vez para transmitir encima',mic_fail:'Micrófono no disponible: ',
+    insecure:'El micrófono necesita https:// o localhost. Abre la consola a través de un proxy TLS.',
+    group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
+    priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
+    delivered:'entregado',
+    causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
+      7:'incompatible',8:'servicio no soportado',9:'expulsado',10:'identidad no válida',11:'desconexión de red',12:'sin canal',
+      13:'tiempo agotado',14:'desconexión de red'}},
+};
+let lang=(()=>{try{return localStorage.getItem('td_lang')}catch(_){return null}})()||((navigator.language||'es').slice(0,2)==='es'?'es':'en');
+const t=k=>(LANGS[lang]&&LANGS[lang][k])||LANGS.en[k]||k;
+const $=id=>document.getElementById(id);
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function applyLang(){
+  document.documentElement.lang=lang;$('lang').value=lang;
+  document.querySelectorAll('[data-t]').forEach(e=>e.textContent=t(e.dataset.t));
+  document.querySelectorAll('[data-tp]').forEach(e=>e.placeholder=t(e.dataset.tp));
+  render();renderLog();renderSds();
+}
+function setTheme(th){if(th)document.documentElement.dataset.theme=th;else delete document.documentElement.dataset.theme}
+try{setTheme(localStorage.getItem('td_theme'))}catch(_){}
+$('theme').onclick=()=>{const cur=document.documentElement.dataset.theme||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+  const nx=cur==='dark'?'light':'dark';setTheme(nx);try{localStorage.setItem('td_theme',nx)}catch(_){}};
+$('lang').onchange=e=>{lang=e.target.value;try{localStorage.setItem('td_lang',lang)}catch(_){}applyLang()};
+
+// ── WebSocket ────────────────────────────────────────────────────────
+let ws=null,wsUp=false,st={},logs=[],sdsMsgs=[],flash='';
+function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
+function connect(){
+  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
+  ws.binaryType='arraybuffer';
+  ws.onopen=()=>{wsUp=true;render()};
+  ws.onclose=()=>{wsUp=false;st={};pttHeld=false;stopAudio();render();setTimeout(connect,2000)};
+  ws.onmessage=ev=>{
+    if(typeof ev.data!=='string'){playPcm(new Int16Array(ev.data));return}
+    const m=JSON.parse(ev.data);
+    if(m.type==='status'){const wasOp=st.you_operate;st=m;if(wasOp&&!m.you_operate)stopAudio();render()}
+    else if(m.type==='history'){logs=m.log||[];sdsMsgs=m.sds||[];renderLog();renderSds()}
+    else if(m.type==='log'){logs.push(m.entry);if(logs.length>100)logs.shift();renderLog()}
+    else if(m.type==='sds'){sdsMsgs.push(m.msg);if(sdsMsgs.length>100)sdsMsgs.shift();renderSds()}
+    else if(m.type==='error'){flash=t(m.error==='busy'?'busy_pos':'not_op');render()}
+  };
+}
+
+// ── Audio ────────────────────────────────────────────────────────────
+const FRAME=480; // 60 ms @ 8 kHz
+let actx=null,mic=null,ulNode=null,dlNode=null,ulAcc=new Int16Array(0),audioErr='';
+const UL_SRC=`class U extends AudioWorkletProcessor{process(i){const c=i[0]&&i[0][0];if(c&&c.length)this.port.postMessage(c.slice());return true}}registerProcessor('td-ul',U);`;
+const DL_SRC=`class D extends AudioWorkletProcessor{constructor(){super();this.q=[];this.n=0;this.port.onmessage=e=>{this.q.push(e.data);this.n+=e.data.length;
+while(this.n>sampleRate*1.5){this.n-=this.q.shift().length}}}
+process(_i,o){const out=o[0][0];let k=0;while(k<out.length&&this.q.length){const h=this.q[0];const m=Math.min(out.length-k,h.length);out.set(h.subarray(0,m),k);k+=m;this.n-=m;
+if(m===h.length)this.q.shift();else this.q[0]=h.subarray(m)}out.fill(0,k);return true}}registerProcessor('td-dl',D);`;
+async function addModule(src){const u=URL.createObjectURL(new Blob([src],{type:'application/javascript'}));try{await actx.audioWorklet.addModule(u)}finally{URL.revokeObjectURL(u)}}
+async function startAudio(){
+  if(actx)return;
+  audioErr='';
+  try{
+    actx=new (window.AudioContext||window.webkitAudioContext)();
+    await addModule(UL_SRC);await addModule(DL_SRC);
+    dlNode=new AudioWorkletNode(actx,'td-dl');dlNode.connect(actx.destination);
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('getUserMedia');
+    mic=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    const src=actx.createMediaStreamSource(mic);
+    ulNode=new AudioWorkletNode(actx,'td-ul');
+    ulNode.port.onmessage=e=>onMic(e.data);
+    const mute=actx.createGain();mute.gain.value=0;
+    src.connect(ulNode);ulNode.connect(mute);mute.connect(actx.destination);
+  }catch(e){audioErr=t('mic_fail')+(e&&e.message?e.message:e);render()}
+}
+function stopAudio(){
+  if(mic){mic.getTracks().forEach(x=>x.stop());mic=null}
+  if(actx){try{actx.close()}catch(_){}actx=null}
+  ulNode=dlNode=null;ulAcc=new Int16Array(0);
+}
+function canTalk(){
+  const p=st.private;
+  if(p&&(p.phase==='connected'||p.phase==='answering'))return p.duplex||p.talking;
+  return st.transmitting!=null;
+}
+function onMic(f32){
+  if(!actx||!st.you_operate||!canTalk()||!ws||ws.readyState!==1){ulAcc=new Int16Array(0);return}
+  const ratio=actx.sampleRate/8000,n=Math.floor(f32.length/ratio),pcm=new Int16Array(n);
+  for(let i=0;i<n;i++){const x=i*ratio,i0=Math.floor(x),a=f32[i0]||0,b=f32[Math.min(i0+1,f32.length-1)]||0;
+    const s=Math.max(-1,Math.min(1,a+(b-a)*(x-i0)));pcm[i]=s*32767|0}
+  const m=new Int16Array(ulAcc.length+pcm.length);m.set(ulAcc);m.set(pcm,ulAcc.length);
+  let off=0;while(m.length-off>=FRAME){ws.send(m.slice(off,off+FRAME).buffer);off+=FRAME}
+  ulAcc=m.slice(off);
+}
+function playPcm(pcm){
+  if(!actx||!dlNode||!pcm.length)return;
+  const ratio=actx.sampleRate/8000,n=Math.floor(pcm.length*ratio),out=new Float32Array(n);
+  for(let i=0;i<n;i++){const x=i/ratio,i0=Math.floor(x),a=pcm[i0]||0,b=pcm[Math.min(i0+1,pcm.length-1)]||0;out[i]=(a+(b-a)*(x-i0))/32768}
+  dlNode.port.postMessage(out,[out.buffer]);
+}
+
+// ── Operator position ────────────────────────────────────────────────
+$('claim').onclick=async()=>{flash='';await startAudio();if(actx&&actx.state==='suspended')await actx.resume();send({type:'claim'})};
+$('release').onclick=()=>{send({type:'release'});stopAudio()};
+
+// ── PTT ──────────────────────────────────────────────────────────────
+let pttHeld=false;
+function pttDown(e){if(e)e.preventDefault();if(pttHeld||!st.you_operate)return;pttHeld=true;flash='';
+  if(actx&&actx.state==='suspended')actx.resume();send({type:'ptt',down:true});render()}
+function pttUp(e){if(e)e.preventDefault();if(!pttHeld)return;pttHeld=false;send({type:'ptt',down:false});render()}
+const ptt=$('ptt');
+ptt.addEventListener('pointerdown',e=>{ptt.setPointerCapture(e.pointerId);pttDown(e)});
+ptt.addEventListener('pointerup',pttUp);ptt.addEventListener('pointercancel',pttUp);
+ptt.addEventListener('contextmenu',e=>e.preventDefault());
+const typing=()=>{const a=document.activeElement;return a&&(a.tagName==='INPUT'||a.tagName==='SELECT'||a.tagName==='TEXTAREA')};
+addEventListener('keydown',e=>{if(e.code==='Space'&&!e.repeat&&!typing())pttDown(e)});
+addEventListener('keyup',e=>{if(e.code==='Space'&&!typing())pttUp(e)});
+addEventListener('blur',()=>pttUp());
+
+// ── Talkgroups ───────────────────────────────────────────────────────
+function sendGroups(listen,tx){send({type:'groups',listen:listen,tx:tx})}
+function knownGroups(){const s=new Set(st.listen||[]);if(st.tx_group)s.add(st.tx_group);return [...s].sort((a,b)=>a-b)}
+$('tg-add').onclick=()=>{const g=parseInt($('tg-new').value,10);if(!(g>0&&g<=16777214))return;
+  const l=new Set(st.listen||[]);l.add(g);sendGroups([...l],st.tx_group||g);$('tg-new').value=''};
+$('tg-new').addEventListener('keydown',e=>{if(e.key==='Enter')$('tg-add').click()});
+$('txsel').onchange=e=>sendGroups(st.listen||[],parseInt(e.target.value,10)||0);
+$('tgs').addEventListener('change',e=>{const g=parseInt(e.target.dataset.g,10);if(!g)return;
+  if(e.target.name==='listen'){const l=new Set(st.listen||[]);e.target.checked?l.add(g):l.delete(g);sendGroups([...l],st.tx_group)}
+  else if(e.target.name==='tx')sendGroups(st.listen||[],g)});
+$('tgs').addEventListener('click',e=>{const g=parseInt(e.target.dataset.rm,10);if(!g)return;
+  sendGroups((st.listen||[]).filter(x=>x!==g),st.tx_group===g?0:st.tx_group)});
+
+// ── Private calls ────────────────────────────────────────────────────
+function dial(duplex){const n=parseInt($('dial').value,10);if(!(n>0))return;flash='';send({type:'call',issi:n,duplex:duplex})}
+$('call-duplex').onclick=()=>dial(true);$('call-simplex').onclick=()=>dial(false);
+$('answer').onclick=()=>send({type:'answer'});$('hangup').onclick=()=>send({type:'hangup'});
+
+// ── SDS ──────────────────────────────────────────────────────────────
+$('sds-send').onclick=()=>{const to=parseInt($('sds-to').value,10),text=$('sds-text').value.trim();if(!(to>0)||!text)return;
+  send({type:'sds',to:to,text:text});$('sds-text').value=''};
+$('sds-text').addEventListener('keydown',e=>{if(e.key==='Enter')$('sds-send').click()});
+function hhmm(ms){return new Date(ms).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
+function renderSds(){
+  $('sds-list').innerHTML=sdsMsgs.slice().reverse().map(m=>`<div class="msg"><div class="meta">${hhmm(m.ts)} · ${m.dir==='in'?esc(m.from)+' → '+esc(m.to):'→ '+esc(m.to)}${m.delivered?' · ✓ '+t('delivered'):''}</div>${esc(m.text)}</div>`).join('');
+}
+
+// ── Rendering ────────────────────────────────────────────────────────
+function causeText(c){return (LANGS[lang].causes||LANGS.en.causes)[c]||String(c)}
+function fmtSecs(s){s=Math.max(0,s|0);return String(s/60|0).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
+function renderLog(){
+  $('log').innerHTML=logs.slice().reverse().map(e=>{
+    let txt='';
+    if(e.kind==='group_rx')txt=`${t('group_rx')} ${esc(e.gssi)} · ${esc(e.source)}`;
+    else if(e.kind==='group_tx')txt=`${t('group_tx')} · ${esc(e.gssi)}`;
+    else if(e.kind==='link')txt=e.up?t('link_up'):t('link_down')+(e.reason?' · '+esc(e.reason):'');
+    else if(e.kind==='private'){txt=t('priv_'+e.event)+` ${e.dir==='in'?'←':'→'} ${esc(e.peer)}`;
+      if(e.secs!=null)txt+=` · ${fmtSecs(e.secs)}`;if(e.event!=='connected'&&e.cause!=null)txt+=` · ${causeText(e.cause)}`}
+    return `<div class="msg"><span class="meta">${hhmm(e.ts)}</span> ${txt}</div>`}).join('');
+}
+function render(){
+  const link=$('link');
+  link.className='pill '+(wsUp&&st.connected?'on':'off');
+  $('link-text').textContent=!wsUp?t('console_down'):st.connected?t('connected'):(st.link_error?t('disconnected'):t('connecting'));
+  link.title=st.link_error||'';
+  $('issi').textContent=st.issi||'—';
+  const op=!!st.you_operate;
+  $('claim').classList.toggle('hidden',op);$('release').classList.toggle('hidden',!op);
+  $('claim').disabled=!wsUp;
+  $('opinfo').textContent=t('operator')+(op?t('you'):(st.operator||t('none')));
+  document.querySelectorAll('#ptt,#call-duplex,#call-simplex,#tg-add,#sds-send,#txsel').forEach(b=>b.disabled=!op);
+
+  // Talkgroups
+  const groups=knownGroups(),listen=new Set(st.listen||[]);
+  $('tgs').innerHTML=groups.map(g=>`<tr><td class="${g===st.tx_group?'tg-tx':''}">${g}</td>
+    <td><input type="checkbox" name="listen" data-g="${g}" ${listen.has(g)?'checked':''} ${op?'':'disabled'}></td>
+    <td><input type="radio" name="tx" data-g="${g}" ${g===st.tx_group?'checked':''} ${op?'':'disabled'}></td>
+    <td><button data-rm="${g}" ${op?'':'disabled'}>${t('remove')}</button></td></tr>`).join('');
+  $('txsel').innerHTML='<option value="0">—</option>'+groups.map(g=>`<option value="${g}" ${g===st.tx_group?'selected':''}>${g}</option>`).join('');
+  $('active').textContent=(st.active&&st.active.length)?t('active')+st.active.map(a=>a.gssi+' ('+a.source+')').join(', '):'';
+
+  // PTT / RX
+  const p=st.private,inCall=p&&['connected','answering'].includes(p.phase);
+  const tx=st.transmitting!=null||(inCall&&!p.duplex&&p.talking);
+  ptt.classList.toggle('tx',tx);
+  ptt.classList.toggle('rx',!tx&&(!!st.rx||(inCall&&p.peer_talking)));
+  let sub=t('hold');
+  if(st.transmitting!=null)sub=`${t('transmitting')} ${t('on_tg')} ${st.transmitting}`;
+  else if(inCall&&!p.duplex)sub=p.talking?t('transmitting'):p.peer_talking?t('peer_talking'):t('hold');
+  else if(st.preempt_offer)sub=t('preempt');
+  $('ptt-sub').textContent=sub;
+  const rx=$('rxbar');
+  if(st.rx){rx.className='rxbar live';rx.innerHTML=`<span class="muted">${t('listening')}</span><span class="big">${esc(st.rx.gssi)}</span><span>← ${esc(st.rx.source)}</span>`}
+  else{rx.className='rxbar';rx.innerHTML=`<span class="muted">${t('no_rx')}</span>`}
+  $('error').textContent=flash||audioErr||st.last_error||'';
+
+  // Private call
+  $('callbox').classList.toggle('hidden',!p);
+  if(p){
+    $('call-dir').textContent=p.inbound?t('incoming'):t('outgoing');
+    $('call-peer').textContent=p.peer;
+    $('call-kind').textContent=p.duplex?t('duplex'):t('simplex');
+    const ph={dialing:'dialing',alerting:'alerting',ringing:'ringing',answering:'answering',connected:'connected_call',ended:'ended',failed:'failed'}[p.phase]||p.phase;
+    $('call-phase').textContent=t(ph)+(p.cause!=null&&(p.phase==='ended'||p.phase==='failed')?' · '+causeText(p.cause):'');
+    $('answer').classList.toggle('hidden',!(p.inbound&&p.phase==='ringing'));
+    $('hangup').classList.toggle('hidden',p.phase==='ended'||p.phase==='failed');
+    $('answer').disabled=$('hangup').disabled=!op;
+  }
+  tickTimer();
+}
+function tickTimer(){const p=st.private;$('call-timer').textContent=p&&p.connected_ms?fmtSecs((Date.now()-p.connected_ms)/1000):''}
+setInterval(tickTimer,1000);
+if(!window.isSecureContext)$('insecure').classList.remove('hidden');
+applyLang();
+connect();
+</script>
+</body>
+</html>
