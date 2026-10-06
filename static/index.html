@@ -327,7 +327,7 @@ function renderMap(){
     m.unbindTooltip().bindTooltip(tip,{permanent:tg!=null,direction:'top',offset:[0,-8],className:tg!=null?'talk':''});
     if(tg!=null)m.bringToFront();
     m.unbindPopup().bindPopup(`<b>ISSI ${esc(issi)}</b>${tg!=null?'<br>TG '+esc(tg):''}<br>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`+
-      (p.speed!=null?`<br>${Math.round(p.speed)} km/h · ${p.heading}°`:'')+`<br>${hhmm(p.ts)}`);
+      (p.speed!=null?`<br>${Math.round(p.speed)} km/h`+(p.heading!=null?` · ${Math.round(p.heading)}°`:''):'')+`<br>${hhmm(p.ts)}`);
   }
   const pts=Object.values(positions);
   if(!fitted&&pts.length){fitted=true;map.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lon])).pad(.2),{maxZoom:15})}
