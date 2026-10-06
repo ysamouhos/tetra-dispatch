@@ -123,9 +123,14 @@ fn velocity(v: u32) -> Option<f64> {
     }
 }
 
+/// Longitude and latitude, `None` for 0,0: radios without a fix report zeros.
 fn lon_lat(b: &mut Bits) -> Option<(f64, f64)> {
-    let lon = signed(b.take(25)?, 25) as f64 * 360.0 / (1u32 << 25) as f64;
-    let lat = signed(b.take(24)?, 24) as f64 * 180.0 / (1u32 << 24) as f64;
+    let (lon, lat) = (b.take(25)?, b.take(24)?);
+    if lon == 0 && lat == 0 {
+        return None;
+    }
+    let lon = signed(lon, 25) as f64 * 360.0 / (1u32 << 25) as f64;
+    let lat = signed(lat, 24) as f64 * 180.0 / (1u32 << 24) as f64;
     Some((lon, lat))
 }
 
@@ -264,5 +269,8 @@ mod tests {
         // Point shape without velocity data still gives a position.
         let p = decode_lip(&pack(&[(1, 2), (3, 4), (0, 2), (1, 4), (lon, 25), (lat, 24)])).unwrap();
         assert!((p.lat - 40.4168).abs() < 1e-4 && p.speed.is_none() && p.heading.is_none());
+        // No fix: zero coordinates are not a position.
+        assert_eq!(decode_lip(&pack(&[(1, 2), (3, 4), (0, 2), (1, 4), (0, 25), (0, 24)])), None);
+        assert_eq!(decode_lip(&pack(&[(0, 2), (0, 2), (0, 25), (0, 24), (0, 3), (0, 7), (0, 4), (0, 9)])), None);
     }
 }

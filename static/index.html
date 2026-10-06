@@ -58,6 +58,9 @@ th{color:var(--muted);font-weight:500}
 .span2{grid-column:1/-1}
 .hidden{display:none!important}
 #map{height:420px;border-radius:8px;border:1px solid var(--line);background:var(--bg)}
+.radio-icon{background:none;border:0;color:var(--accent);filter:drop-shadow(0 1px 1px rgba(0,0,0,.45))}
+.radio-icon.talking{color:var(--tx)}
+.radio-icon svg{display:block;width:100%;height:100%}
 .leaflet-tooltip.talk{background:var(--tx);color:#fff;border-color:var(--tx);font-weight:650}
 .leaflet-tooltip.talk::before{border-top-color:var(--tx)}
 .banner{padding:10px 16px;background:var(--warn);color:#fff;text-align:center}
@@ -314,21 +317,26 @@ function initMap(){
     g=>{if(!fitted)map.setView([g.coords.latitude,g.coords.longitude],11)},()=>{},{maximumAge:600000,timeout:10000});
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
 }
+// Handheld radio: antenna, body, display and keypad; colour from CSS (currentColor).
+const RADIO_SVG='<svg viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg"><rect x="15" y="1" width="3" height="11" rx="1.5" fill="currentColor" stroke="#fff" stroke-width="1"/>'+
+  '<rect x="4" y="9" width="16" height="26" rx="3" fill="currentColor" stroke="#fff" stroke-width="1.5"/><rect x="7" y="12.5" width="10" height="7" rx="1" fill="#fff" opacity=".9"/>'+
+  '<g fill="#fff" opacity=".85"><circle cx="8.5" cy="23.5" r="1.1"/><circle cx="12" cy="23.5" r="1.1"/><circle cx="15.5" cy="23.5" r="1.1"/>'+
+  '<circle cx="8.5" cy="27" r="1.1"/><circle cx="12" cy="27" r="1.1"/><circle cx="15.5" cy="27" r="1.1"/><circle cx="8.5" cy="30.5" r="1.1"/><circle cx="12" cy="30.5" r="1.1"/><circle cx="15.5" cy="30.5" r="1.1"/></g></svg>';
+function radioIcon(talking){const w=talking?28:20,h=talking?42:30;
+  return L.divIcon({html:RADIO_SVG,className:'radio-icon'+(talking?' talking':''),iconSize:[w,h],iconAnchor:[w/2,h/2]})}
 function renderMap(){
   // Talker ISSI → talkgroup, from the calls on listened groups.
   const talking={};(st.active||[]).forEach(a=>talking[a.source]=a.gssi);
-  const css=getComputedStyle(document.documentElement),txc=css.getPropertyValue('--tx').trim(),acc=css.getPropertyValue('--accent').trim();
   const nopos=Object.keys(talking).filter(i=>!positions[i]);
   $('map-info').textContent=t('radios')+Object.keys(positions).length+(nopos.length?' · '+t('talking_nopos')+nopos.map(i=>i+' (TG '+talking[i]+')').join(', '):'');
   if(!map)return;
   for(const [issi,p] of Object.entries(positions)){
     const tg=talking[issi],tip=tg!=null?`${issi} · TG ${tg}`:String(issi);
     let m=markers[issi];
-    if(!m){m=markers[issi]=L.circleMarker([p.lat,p.lon]).addTo(map)}
+    if(!m){m=markers[issi]=L.marker([p.lat,p.lon]).addTo(map)}
     m.setLatLng([p.lat,p.lon]);
-    m.setStyle({radius:tg!=null?11:7,color:tg!=null?txc:acc,fillColor:tg!=null?txc:acc,fillOpacity:tg!=null?.9:.6,weight:tg!=null?3:2});
-    m.unbindTooltip().bindTooltip(tip,{permanent:tg!=null,direction:'top',offset:[0,-8],className:tg!=null?'talk':''});
-    if(tg!=null)m.bringToFront();
+    if(m.talking!==(tg!=null)){m.talking=tg!=null;m.setIcon(radioIcon(m.talking));m.setZIndexOffset(m.talking?1000:0)}
+    m.unbindTooltip().bindTooltip(tip,{permanent:tg!=null,direction:'top',offset:[0,tg!=null?-24:-18],className:tg!=null?'talk':''});
     m.unbindPopup().bindPopup(`<b>ISSI ${esc(issi)}</b>${tg!=null?'<br>TG '+esc(tg):''}<br>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`+
       (p.speed!=null?`<br>${Math.round(p.speed)} km/h`+(p.heading!=null?` · ${Math.round(p.heading)}°`:''):'')+`<br>${hhmm(p.ts)}`);
   }
