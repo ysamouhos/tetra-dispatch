@@ -99,6 +99,7 @@ th{color:var(--muted);font-weight:500}
       <input id="dial" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI" style="width:140px">
       <button id="call-duplex" class="ok" data-t="call_duplex"></button>
       <button id="call-simplex" data-t="call_simplex"></button>
+      <button id="call-ambience" data-t="ambience" title=""></button>
     </div>
     <div id="callbox" class="callbox hidden">
       <div class="row"><span id="call-dir" class="muted"></span><b id="call-peer" class="big"></b><span id="call-kind" class="pill"></span></div>
@@ -113,6 +114,15 @@ th{color:var(--muted);font-weight:500}
   <section class="card span2">
     <h2 data-t="map"></h2>
     <div id="map"></div>
+    <div class="row" style="margin-top:10px">
+      <input id="loc-issi" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI" style="width:120px">
+      <button id="loc-once" data-t="loc_once"></button>
+      <label class="muted" for="loc-period" data-t="loc_every"></label>
+      <input id="loc-period" type="number" min="5" max="86400" value="30" style="width:80px">
+      <span class="muted" data-t="seconds"></span>
+      <button id="loc-poll" data-t="loc_poll"></button>
+    </div>
+    <div class="row muted" id="polls" style="margin-top:6px"></div>
     <div class="row muted" id="map-info" style="margin-top:8px"></div>
   </section>
 
@@ -154,9 +164,9 @@ const LANGS={
     answering:'Connecting…',connected_call:'Connected',ended:'Call ended',failed:'Call failed',duplex:'duplex',simplex:'simplex',
     remove:'Remove',active:'Active: ',preempt:'Busy — press again to transmit over it',mic_fail:'Microphone unavailable: ',
     insecure:'The microphone needs https:// or localhost. Open the console through a TLS proxy.',
-    group_rx:'Group call',group_tx:'Dispatcher transmitted',link_up:'Brew link up',link_down:'Brew link down',
+    group_rx:'Group call',group_tx:'Dispatcher transmitted',loc_req_once:'Location requested',loc_req_poll:'Location polling started',loc_req_stop:'Location polling stopped',link_up:'Brew link up',link_down:'Brew link down',
     priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
-    delivered:'delivered',logs:'Logs',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
+    delivered:'delivered',logs:'Logs',ambience:'Ambience listen (experimental)',amb_hint:'Open a listening call to the radio. The radio shows the call — this is not covert. Experimental: the brew-server only relays the call, so it works only if the radio/basestation supports ambience listening.',ambience_call:'Ambience listening',loc_once:'Locate once',loc_every:'every',seconds:'s',loc_poll:'Start polling',loc_stop:'Stop',polling:'Polling: ',listen_only:'Listening (radio talks)',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
     causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
       7:'incompatible',8:'service not supported',9:'pre-empted',10:'invalid identity',11:'SwMI disconnect',12:'no idle cc',
       13:'timeout',14:'SwMI disconnect'}},
@@ -170,9 +180,9 @@ const LANGS={
     answering:'Conectando…',connected_call:'Conectada',ended:'Llamada finalizada',failed:'Llamada fallida',duplex:'dúplex',simplex:'símplex',
     remove:'Quitar',active:'Activos: ',preempt:'Ocupado — pulsa otra vez para transmitir encima',mic_fail:'Micrófono no disponible: ',
     insecure:'El micrófono necesita https:// o localhost. Abre la consola a través de un proxy TLS.',
-    group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
+    group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',loc_req_once:'Localización solicitada',loc_req_poll:'Sondeo de localización iniciado',loc_req_stop:'Sondeo de localización detenido',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
     priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
-    delivered:'entregado',logs:'Registros',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
+    delivered:'entregado',logs:'Registros',ambience:'Escucha ambiente (experimental)',amb_hint:'Abre una llamada de escucha a la radio. La radio muestra la llamada — no es encubierto. Experimental: el brew-server solo reenvía la llamada, así que funciona solo si la radio/estación base admite escucha ambiente.',ambience_call:'Escucha ambiente',loc_once:'Localizar',loc_every:'cada',seconds:'s',loc_poll:'Sondear',loc_stop:'Parar',polling:'Sondeando: ',listen_only:'Escuchando (habla la radio)',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
     causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
       7:'incompatible',8:'servicio no soportado',9:'expulsado',10:'identidad no válida',11:'desconexión de red',12:'sin canal',
       13:'tiempo agotado',14:'desconexión de red'}},
@@ -185,6 +195,7 @@ function applyLang(){
   document.documentElement.lang=lang;$('lang').value=lang;
   document.querySelectorAll('[data-t]').forEach(e=>e.textContent=t(e.dataset.t));
   document.querySelectorAll('[data-tp]').forEach(e=>e.placeholder=t(e.dataset.tp));
+  $('call-ambience').title=t('amb_hint');
   render();renderLog();renderSds();
 }
 function setTheme(th){if(th)document.documentElement.dataset.theme=th;else delete document.documentElement.dataset.theme}
@@ -298,6 +309,12 @@ $('tgs').addEventListener('click',e=>{const g=parseInt(e.target.dataset.rm,10);i
 // ── Private calls ────────────────────────────────────────────────────
 function dial(duplex){const n=parseInt($('dial').value,10);if(!(n>0))return;flash='';send({type:'call',issi:n,duplex:duplex})}
 $('call-duplex').onclick=()=>dial(true);$('call-simplex').onclick=()=>dial(false);
+$('call-ambience').onclick=()=>{const n=parseInt($('dial').value,10);if(!(n>0))return;flash='';send({type:'ambience',issi:n})};
+function locate(n,period){if(!(n>0))return;send({type:'locate',issi:n,period_s:period})}
+$('loc-once').onclick=()=>locate(parseInt($('loc-issi').value,10),0);
+$('loc-poll').onclick=()=>locate(parseInt($('loc-issi').value,10),Math.max(5,parseInt($('loc-period').value,10)||30));
+$('polls').addEventListener('click',e=>{const i=parseInt(e.target.dataset.stop,10);if(i)send({type:'locate_stop',issi:i})});
+$('map').addEventListener('click',e=>{const b=e.target.closest('[data-loc]');if(b)locate(parseInt(b.dataset.loc,10),0)});
 $('answer').onclick=()=>send({type:'answer'});$('hangup').onclick=()=>send({type:'hangup'});
 
 // ── SDS ──────────────────────────────────────────────────────────────
@@ -331,6 +348,8 @@ function renderMap(){
   const talking={};(st.active||[]).forEach(a=>talking[a.source]=a.gssi);
   const nopos=Object.keys(talking).filter(i=>!positions[i]);
   $('map-info').textContent=t('radios')+Object.keys(positions).length+(nopos.length?' · '+t('talking_nopos')+nopos.map(i=>i+' (TG '+talking[i]+')').join(', '):'');
+  const polls=st.polls||[];
+  $('polls').innerHTML=polls.length?t('polling')+polls.map(p=>`${esc(p.issi)} (${esc(p.period_s)}s) <button data-stop="${esc(p.issi)}">${t('loc_stop')}</button>`).join(' '):'';
   if(!map)return;
   for(const [issi,p] of Object.entries(positions)){
     const tg=talking[issi],tip=tg!=null?`${issi} · TG ${tg}`:String(issi);
@@ -340,7 +359,8 @@ function renderMap(){
     if(m.talking!==(tg!=null)){m.talking=tg!=null;m.setIcon(radioIcon(m.talking));m.setZIndexOffset(m.talking?1000:0)}
     m.unbindTooltip().bindTooltip(tip,{permanent:tg!=null,direction:'top',offset:[0,tg!=null?-24:-18],className:tg!=null?'talk':''});
     m.unbindPopup().bindPopup(`<b>ISSI ${esc(issi)}</b>${tg!=null?'<br>TG '+esc(tg):''}<br>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`+
-      (p.speed!=null?`<br>${Math.round(p.speed)} km/h`+(p.heading!=null?` · ${Math.round(p.heading)}°`:''):'')+`<br>${hhmm(p.ts)}`);
+      (p.speed!=null?`<br>${Math.round(p.speed)} km/h`+(p.heading!=null?` · ${Math.round(p.heading)}°`:''):'')+`<br>${hhmm(p.ts)}`+
+      `<br><button data-loc="${esc(issi)}" style="margin-top:6px">${t('loc_once')}</button>`);
   }
   const pts=Object.values(positions);
   if(!fitted&&pts.length){fitted=true;map.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lon])).pad(.2),{maxZoom:15})}
@@ -355,6 +375,7 @@ function renderLog(){
     if(e.kind==='group_rx')txt=`${t('group_rx')} ${esc(e.gssi)} · ${esc(e.source)}`;
     else if(e.kind==='group_tx')txt=`${t('group_tx')} · ${esc(e.gssi)}`;
     else if(e.kind==='link')txt=e.up?t('link_up'):t('link_down')+(e.reason?' · '+esc(e.reason):'');
+    else if(e.kind==='location_req')txt=(e.period_s?t('loc_req_poll')+` · ${e.period_s}s`:t('loc_req_once'))+` · ${esc(e.issi)}`;
     else if(e.kind==='private'){txt=t('priv_'+e.event)+` ${e.dir==='in'?'←':'→'} ${esc(e.peer)}`;
       if(e.secs!=null)txt+=` · ${fmtSecs(e.secs)}`;if(e.event!=='connected'&&e.cause!=null)txt+=` · ${causeText(e.cause)}`}
     return `<div class="msg"><span class="meta">${hhmm(e.ts)}</span> ${txt}</div>`}).join('');
@@ -369,7 +390,7 @@ function render(){
   $('claim').classList.toggle('hidden',op);$('release').classList.toggle('hidden',!op);
   $('claim').disabled=!wsUp;
   $('opinfo').textContent=t('operator')+(op?t('you'):(st.operator||t('none')));
-  document.querySelectorAll('#ptt,#call-duplex,#call-simplex,#tg-add,#sds-send,#txsel').forEach(b=>b.disabled=!op);
+  document.querySelectorAll('#ptt,#call-duplex,#call-simplex,#call-ambience,#tg-add,#sds-send,#txsel,#loc-once,#loc-poll').forEach(b=>b.disabled=!op);
 
   // Talkgroups
   const groups=knownGroups(),listen=new Set(st.listen||[]);
@@ -387,6 +408,7 @@ function render(){
   ptt.classList.toggle('rx',!tx&&(!!st.rx||(inCall&&p.peer_talking)));
   let sub=t('hold');
   if(st.transmitting!=null)sub=`${t('transmitting')} ${t('on_tg')} ${st.transmitting}`;
+  else if(inCall&&p.ambience)sub=t('listen_only');
   else if(inCall&&!p.duplex)sub=p.talking?t('transmitting'):p.peer_talking?t('peer_talking'):t('hold');
   else if(st.preempt_offer)sub=t('preempt');
   $('ptt-sub').textContent=sub;
@@ -400,7 +422,7 @@ function render(){
   if(p){
     $('call-dir').textContent=p.inbound?t('incoming'):t('outgoing');
     $('call-peer').textContent=p.peer;
-    $('call-kind').textContent=p.duplex?t('duplex'):t('simplex');
+    $('call-kind').textContent=p.ambience?t('ambience_call'):p.duplex?t('duplex'):t('simplex');
     const ph={dialing:'dialing',alerting:'alerting',ringing:'ringing',answering:'answering',connected:'connected_call',ended:'ended',failed:'failed'}[p.phase]||p.phase;
     $('call-phase').textContent=t(ph)+(p.cause!=null&&(p.phase==='ended'||p.phase==='failed')?' · '+causeText(p.cause):'');
     $('answer').classList.toggle('hidden',!(p.inbound&&p.phase==='ringing'));

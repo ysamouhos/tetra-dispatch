@@ -68,7 +68,7 @@ const LANGS={
   en:{title:'Logs',back:'← Console',activity:'Activity',search:'Search…',time:'Time',event:'Event',details:'Details',
     from:'From',to:'To',text:'Message',status:'Status',delivered:'delivered',sent:'sent',received:'received',
     shown:'{n} of {t} entries (kept in memory, lost on restart)',empty:'No entries',
-    group_rx:'Group call',group_tx:'Dispatcher transmitted',link_up:'Brew link up',link_down:'Brew link down',
+    group_rx:'Group call',group_tx:'Dispatcher transmitted',loc_req_once:'Location requested',loc_req_poll:'Location polling',link_up:'Brew link up',link_down:'Brew link down',
     priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
     causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
       7:'incompatible',8:'service not supported',9:'pre-empted',10:'invalid identity',11:'SwMI disconnect',12:'no idle cc',
@@ -76,7 +76,7 @@ const LANGS={
   es:{title:'Registros',back:'← Consola',activity:'Actividad',search:'Buscar…',time:'Hora',event:'Evento',details:'Detalles',
     from:'De',to:'A',text:'Mensaje',status:'Estado',delivered:'entregado',sent:'enviado',received:'recibido',
     shown:'{n} de {t} entradas (en memoria, se pierden al reiniciar)',empty:'Sin entradas',
-    group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
+    group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',loc_req_once:'Localización solicitada',loc_req_poll:'Sondeo de localización',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
     priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
     causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
       7:'incompatible',8:'servicio no soportado',9:'expulsado',10:'identidad no válida',11:'desconexión de red',12:'sin canal',
@@ -105,6 +105,7 @@ function logRow(e){
   if(e.kind==='group_rx'){ev=t('group_rx');det=`TG ${e.gssi} · ISSI ${e.source}`}
   else if(e.kind==='group_tx'){ev=t('group_tx');det=`TG ${e.gssi}`}
   else if(e.kind==='link'){ev=e.up?t('link_up'):t('link_down');det=e.reason||''}
+  else if(e.kind==='location_req'){ev=e.period_s?t('loc_req_poll'):t('loc_req_once');det=`ISSI ${e.issi}`+(e.period_s?` · ${e.period_s}s`:'')}
   else if(e.kind==='private'){ev=t('priv_'+e.event);det=`${e.dir==='in'?'←':'→'} ${e.peer}`;
     if(e.secs!=null)det+=` · ${fmtSecs(e.secs)}`;if(e.event!=='connected'&&e.cause!=null)det+=` · ${causeText(e.cause)}`}
   return [stamp(e.ts),ev,det];

@@ -23,6 +23,12 @@ pub type ClientId = u64;
 
 /// Disconnect causes (ETSI EN 300 392-2 §14.8.18) used here.
 const CAUSE_USER_REQUESTED: u8 = 1;
+/// TETRA basic service for an ambience-listening call. Experimental: the
+/// brew-server only relays the private-call setup (it never reads this byte),
+/// so ambience listening happens only if the destination radio/basestation
+/// supports it. The exact value a given fleet expects may differ; adjust for
+/// the deployment.
+const SERVICE_AMBIENCE_LISTENING: u8 = 9;
 const CAUSE_CALLED_PARTY_BUSY: u8 = 2;
 const CAUSE_NOT_REACHABLE: u8 = 3;
 
@@ -61,6 +67,13 @@ pub enum UiCmd {
     Answer,
     Hangup,
     Sds { dest: u32, text: String },
+    /// Ambience-listening call to a radio (indicated on the radio).
+    AmbienceListen { issi: u32 },
+    /// Request a position report. `period_s` 0 = once; otherwise poll every
+    /// `period_s` seconds. A new period for the same ISSI replaces the old.
+    LocationRequest { issi: u32, period_s: u32 },
+    /// Stop polling a radio's position.
+    LocationStop { issi: u32 },
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +137,9 @@ struct Private {
     talking: bool,
     /// Simplex: the radio holds the floor.
     peer_talking: bool,
+    /// Ambience-listening call: the radio is the only talker; the console
+    /// never keys. The radio indicates the call like any other (not covert).
+    ambience: bool,
 }
 
 /// What the call panel shows for a few seconds after a private call ends.
@@ -161,6 +177,8 @@ pub struct Dispatcher {
     sds: VecDeque<Value>,
     /// Last LIP position per ISSI.
     positions: BTreeMap<u32, Value>,
+    /// Radios being polled for position: ISSI → (period, next due).
+    polls: HashMap<u32, (Duration, Instant)>,
     sds_ref: u8,
     /// SHORT_TRANSFER headers waiting for their SDS_TRANSFER frame.
     sds_pending: HashMap<Uuid, (u32, u32)>,
@@ -204,6 +222,7 @@ impl Dispatcher {
             log: VecDeque::new(),
             sds: VecDeque::new(),
             positions: BTreeMap::new(),
+            polls: HashMap::new(),
             sds_ref: 0,
             sds_pending: HashMap::new(),
         }
@@ -527,6 +546,7 @@ impl Dispatcher {
             connected_at: None,
             talking: false,
             peer_talking: false,
+            ambience: false,
         });
         self.ended = None;
         self.playing = None;
@@ -535,6 +555,14 @@ impl Dispatcher {
     }
 
     fn start_private(&mut self, dest: u32, duplex: bool) {
+        self.start_call(dest, duplex, false);
+    }
+
+    /// Set up an outgoing individual call. `ambience` requests a TETRA
+    /// ambience-listening call: a simplex call where only the radio talks and
+    /// the console never keys. The radio shows the call like any normal call;
+    /// this is not a covert feature.
+    fn start_call(&mut self, dest: u32, duplex: bool, ambience: bool) {
         if !valid_ssi(dest) || dest == self.issi {
             self.last_error = Some("invalid ISSI".into());
             return;
@@ -553,7 +581,10 @@ impl Dispatcher {
             destination: dest,
             number: String::new(),
             priority: self.cfg.priority,
-            service: 0,
+            // Ambience listening is a distinct TETRA service; a normal call
+            // otherwise. The exact service code depends on the brew-server and
+            // radios and may need adjusting for a given fleet.
+            service: if ambience { SERVICE_AMBIENCE_LISTENING } else { 0 },
             mode: 0,
             duplex: duplex as u8,
             // Hook signalling for a phone-style duplex call, direct for simplex.
@@ -578,11 +609,12 @@ impl Dispatcher {
             connected_at: None,
             talking: false,
             peer_talking: false,
+            ambience,
         });
         self.ended = None;
         self.playing = None;
         self.last_error = None;
-        info!(dest, duplex, "calling");
+        info!(dest, duplex, ambience, "calling");
     }
 
     fn answer(&mut self) {
@@ -668,6 +700,12 @@ impl Dispatcher {
             UiCmd::Answer => self.answer(),
             UiCmd::Hangup => self.hangup(),
             UiCmd::Sds { dest, text } => self.send_text(dest, text),
+            UiCmd::AmbienceListen { issi } => self.start_call(issi, false, true),
+            UiCmd::LocationRequest { issi, period_s } => self.request_location(issi, period_s),
+            UiCmd::LocationStop { issi } => {
+                self.polls.remove(&issi);
+                self.push_status();
+            }
             UiCmd::Claim | UiCmd::Release => unreachable!(),
         }
     }
@@ -686,7 +724,8 @@ impl Dispatcher {
     fn set_ptt(&mut self, down: bool) {
         let was_down = std::mem::replace(&mut self.ptt_down, down);
         if let Some(p) = self.private.as_mut() {
-            if p.duplex || p.phase != Phase::Connected {
+            // Ambience listening is receive-only: the console never keys.
+            if p.duplex || p.ambience || p.phase != Phase::Connected {
                 return;
             }
             if down && !p.talking {
@@ -763,6 +802,29 @@ impl Dispatcher {
         }
     }
 
+    /// Ask a radio for a position report. `period_s` 0 sends one request;
+    /// otherwise the console re-sends every `period_s` seconds until stopped.
+    fn request_location(&mut self, issi: u32, period_s: u32) {
+        if !valid_ssi(issi) {
+            self.last_error = Some("invalid ISSI".into());
+            return;
+        }
+        if self.link.is_none() {
+            self.last_error = Some("not connected to brew-server".into());
+            return;
+        }
+        self.send_sds_raw(issi, &sds::encode_location_request());
+        let period_s = period_s.clamp(0, 86_400);
+        if period_s == 0 {
+            self.polls.remove(&issi);
+        } else {
+            let period = Duration::from_secs(period_s as u64);
+            self.polls.insert(issi, (period, Instant::now() + period));
+        }
+        self.note("location_req", json!({"issi": issi, "period_s": period_s}));
+        self.push_status();
+    }
+
     fn send_text(&mut self, dest: u32, text: String) {
         let text = text.trim().to_string();
         if !valid_ssi(dest) || text.is_empty() {
@@ -824,6 +886,16 @@ impl Dispatcher {
             self.preempt_until = None;
             changed = true;
         }
+        // Re-send location requests that have come due.
+        let due: Vec<u32> = self.polls.iter().filter(|(_, (_, next))| now >= *next).map(|(&i, _)| i).collect();
+        for issi in due {
+            if self.link.is_some() {
+                self.send_sds_raw(issi, &sds::encode_location_request());
+            }
+            if let Some((period, next)) = self.polls.get_mut(&issi) {
+                *next = now + *period;
+            }
+        }
         changed
     }
 
@@ -833,7 +905,7 @@ impl Dispatcher {
         let private = if let Some(p) = &self.private {
             json!({
                 "peer": p.peer, "duplex": p.duplex, "inbound": p.inbound, "phase": p.phase.name(),
-                "talking": p.talking, "peer_talking": p.peer_talking,
+                "talking": p.talking, "peer_talking": p.peer_talking, "ambience": p.ambience,
                 "connected_ms": p.connected_at.map(epoch_ms_at),
             })
         } else if let Some(e) = &self.ended {
@@ -856,6 +928,7 @@ impl Dispatcher {
             "rx": rx,
             "active": active,
             "private": private,
+            "polls": self.polls.iter().map(|(&i, (p, _))| json!({"issi": i, "period_s": p.as_secs()})).collect::<Vec<_>>(),
             "operator": self.owner.and_then(|id| self.clients.get(&id)),
             "last_error": self.last_error,
         })

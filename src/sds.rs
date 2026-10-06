@@ -93,6 +93,37 @@ pub struct Position {
     pub heading: Option<f64>,
 }
 
+/// LIP "Location reporting request" asking for one immediate short location
+/// report (ETSI TS 100 392-18-1 §6.3). Sent as a plain LIP SDS (PID 0x0A).
+///
+/// NOTE: the bit layout here is written from the spec and should be checked
+/// against the radio fleet — the same caveat as [`decode_lip`]'s long form.
+/// The console drives periodic polling on its own timer, so a radio that
+/// honours only the immediate request still reports on every poll.
+pub fn encode_location_request() -> Vec<u8> {
+    // PDU type 01 = location protocol PDU; type extension 0010 = reporting
+    // request; request type 00 = immediate report; then "report type" 0 =
+    // short location report, and no optional parameters.
+    let bits: &[(u32, usize)] = &[
+        (0b01, 2),  // PDU type: location protocol PDU
+        (0b0010, 4), // PDU type extension: location reporting request
+        (0b00, 2),  // request type: immediate report
+        (0b0, 1),   // report type: short location report
+        (0b0, 1),   // no further parameters
+    ];
+    let mut acc = 0u32;
+    let mut n = 0usize;
+    for &(v, w) in bits {
+        acc = (acc << w) | v;
+        n += w;
+    }
+    acc <<= (8 - n % 8) % 8; // left-align into whole bytes
+    let bytes = n.div_ceil(8);
+    let mut out = vec![PID_LIP];
+    out.extend((0..bytes).rev().map(|i| (acc >> (i * 8)) as u8));
+    out
+}
+
 struct Bits<'a> {
     data: &'a [u8],
     pos: usize,
@@ -269,6 +300,10 @@ mod tests {
         // Point shape without velocity data still gives a position.
         let p = decode_lip(&pack(&[(1, 2), (3, 4), (0, 2), (1, 4), (lon, 25), (lat, 24)])).unwrap();
         assert!((p.lat - 40.4168).abs() < 1e-4 && p.speed.is_none() && p.heading.is_none());
+        // A location request is a LIP PDU, but not a report → no position.
+        let req = encode_location_request();
+        assert_eq!(req[0], PID_LIP);
+        assert_eq!(decode_lip(&req), None);
         // No fix: zero coordinates are not a position.
         assert_eq!(decode_lip(&pack(&[(1, 2), (3, 4), (0, 2), (1, 4), (0, 25), (0, 24)])), None);
         assert_eq!(decode_lip(&pack(&[(0, 2), (0, 2), (0, 25), (0, 24), (0, 3), (0, 7), (0, 4), (0, 9)])), None);
