@@ -34,6 +34,7 @@ button{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid var(--li
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 button.danger{background:var(--bad);border-color:var(--bad);color:#fff}
 button.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+button.amb{background:#8b0000;border-color:#8b0000;color:#fff}
 button:disabled{opacity:.45;cursor:not-allowed}
 input,select{font:inherit;padding:7px 9px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg);min-width:0}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -82,7 +83,7 @@ th{color:var(--muted);font-weight:500}
 </header>
 <div id="insecure" class="banner hidden" data-t="insecure"></div>
 <main>
-  <section class="card">
+  <section class="card" style="grid-row:span 2">
     <h2 data-t="talk"></h2>
     <div class="row">
       <label class="muted" for="txsel" data-t="tx_group"></label>
@@ -96,10 +97,12 @@ th{color:var(--muted);font-weight:500}
   <section class="card">
     <h2 data-t="private"></h2>
     <div class="row">
-      <input id="dial" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI" style="width:140px">
+      <input id="dial" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI" style="width:100px">
       <button id="call-duplex" class="ok" data-t="call_duplex"></button>
       <button id="call-simplex" data-t="call_simplex"></button>
-      <button id="call-ambience" data-t="ambience" title=""></button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="call-ambience" class="amb" data-t="ambience" title=""></button>
     </div>
     <div id="callbox" class="callbox hidden">
       <div class="row"><span id="call-dir" class="muted"></span><b id="call-peer" class="big"></b><span id="call-kind" class="pill"></span></div>
@@ -111,18 +114,22 @@ th{color:var(--muted);font-weight:500}
     </div>
   </section>
 
-  <section class="card span2">
-    <h2 data-t="map"></h2>
-    <div id="map"></div>
-    <div class="row" style="margin-top:10px">
-      <input id="loc-issi" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI" style="width:120px">
+  <section class="card">
+    <h2 data-t="locate"></h2>
+    <div class="row">
+      <input id="loc-issi" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI" style="width:100px">
       <button id="loc-once" data-t="loc_once"></button>
       <label class="muted" for="loc-period" data-t="loc_every"></label>
-      <input id="loc-period" type="number" min="5" max="86400" value="30" style="width:80px">
+      <input id="loc-period" type="number" min="5" max="86400" value="30" style="width:70px">
       <span class="muted" data-t="seconds"></span>
       <button id="loc-poll" data-t="loc_poll"></button>
     </div>
     <div class="row muted" id="polls" style="margin-top:6px"></div>
+  </section>
+
+  <section class="card span2">
+    <h2 data-t="map"></h2>
+    <div id="map"></div>
     <div class="row muted" id="map-info" style="margin-top:8px"></div>
   </section>
 
@@ -166,7 +173,7 @@ const LANGS={
     insecure:'The microphone needs https:// or localhost. Open the console through a TLS proxy.',
     group_rx:'Group call',group_tx:'Dispatcher transmitted',loc_req_once:'Location requested',loc_req_poll:'Location polling started',loc_req_stop:'Location polling stopped',link_up:'Brew link up',link_down:'Brew link down',
     priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
-    delivered:'delivered',logs:'Logs',ambience:'Ambience listen (experimental)',amb_hint:'Open a listening call to the radio. The radio shows the call — this is not covert. Experimental: the brew-server only relays the call, so it works only if the radio/basestation supports ambience listening.',ambience_call:'Ambience listening',loc_once:'Locate once',loc_every:'every',seconds:'s',loc_poll:'Start polling',loc_stop:'Stop',polling:'Polling: ',listen_only:'Listening (radio talks)',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
+    delivered:'delivered',logs:'Logs',ambience:'Ambient listen',amb_hint:'Open a listening call to the radio. The radio shows the call — this is not covert. The brew-server only relays the call, so it works only if the radio/basestation supports ambience listening.',ambience_call:'Ambient Listen Call',locate:'Locate',loc_once:'Locate once',loc_every:'every',seconds:'s',loc_poll:'Start polling',loc_stop:'Stop',polling:'Polling: ',listen_only:'Listening (radio talks)',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
     causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
       7:'incompatible',8:'service not supported',9:'pre-empted',10:'invalid identity',11:'SwMI disconnect',12:'no idle cc',
       13:'timeout',14:'SwMI disconnect'}},
@@ -182,7 +189,7 @@ const LANGS={
     insecure:'El micrófono necesita https:// o localhost. Abre la consola a través de un proxy TLS.',
     group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',loc_req_once:'Localización solicitada',loc_req_poll:'Sondeo de localización iniciado',loc_req_stop:'Sondeo de localización detenido',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
     priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
-    delivered:'entregado',logs:'Registros',ambience:'Escucha ambiente (experimental)',amb_hint:'Abre una llamada de escucha a la radio. La radio muestra la llamada — no es encubierto. Experimental: el brew-server solo reenvía la llamada, así que funciona solo si la radio/estación base admite escucha ambiente.',ambience_call:'Escucha ambiente',loc_once:'Localizar',loc_every:'cada',seconds:'s',loc_poll:'Sondear',loc_stop:'Parar',polling:'Sondeando: ',listen_only:'Escuchando (habla la radio)',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
+    delivered:'entregado',logs:'Registros',ambience:'Escucha ambiente',amb_hint:'Abre una llamada de escucha a la radio. La radio muestra la llamada — no es encubierto. El brew-server solo reenvía la llamada, así que funciona solo si la radio/estación base admite escucha ambiente.',ambience_call:'Llamada de escucha ambiente',locate:'Localización',loc_once:'Localizar',loc_every:'cada',seconds:'s',loc_poll:'Sondear',loc_stop:'Parar',polling:'Sondeando: ',listen_only:'Escuchando (habla la radio)',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
     causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
       7:'incompatible',8:'servicio no soportado',9:'expulsado',10:'identidad no válida',11:'desconexión de red',12:'sin canal',
       13:'tiempo agotado',14:'desconexión de red'}},
