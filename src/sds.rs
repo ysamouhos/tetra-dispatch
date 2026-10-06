@@ -78,6 +78,73 @@ pub fn decode_text(data: &[u8]) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+/// Location Information Protocol (ETSI TS 100 392-18-1), plain and over SDS-TL.
+pub const PID_LIP: u8 = 0x0A;
+pub const PID_LIP_TL: u8 = 0x83;
+
+/// Position from a LIP short location report.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Position {
+    pub lat: f64,
+    pub lon: f64,
+    /// km/h, `None` when the radio reports it unknown.
+    pub speed: Option<f64>,
+    /// Degrees from north, 22.5° steps.
+    pub heading: f64,
+}
+
+struct Bits<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl Bits<'_> {
+    fn take(&mut self, n: usize) -> Option<u32> {
+        let mut v = 0u32;
+        for _ in 0..n {
+            let byte = *self.data.get(self.pos / 8)?;
+            v = (v << 1) | ((byte >> (7 - self.pos % 8)) & 1) as u32;
+            self.pos += 1;
+        }
+        Some(v)
+    }
+}
+
+fn signed(v: u32, bits: u32) -> i32 {
+    ((v << (32 - bits)) as i32) >> (32 - bits)
+}
+
+/// Position of a LIP short location report, `None` for anything else.
+pub fn decode_lip(data: &[u8]) -> Option<Position> {
+    let pdu = match *data.first()? {
+        PID_LIP => &data[1..],
+        PID_LIP_TL => {
+            let info = tl_info(data)?;
+            if !info.is_transfer || data[1] & 0x01 != 0 {
+                return None;
+            }
+            data.get(3..)?
+        }
+        _ => return None,
+    };
+    let mut b = Bits { data: pdu, pos: 0 };
+    if b.take(2)? != 0 {
+        return None; // not a short location report
+    }
+    b.take(2)?; // time elapsed
+    let lon = signed(b.take(25)?, 25) as f64 * 360.0 / (1u32 << 25) as f64;
+    let lat = signed(b.take(24)?, 24) as f64 * 180.0 / (1u32 << 24) as f64;
+    b.take(3)?; // position error
+    let v = b.take(7)?;
+    let heading = b.take(4)? as f64 * 22.5;
+    let speed = match v {
+        0..=28 => Some(v as f64),
+        127 => None,
+        _ => Some(16.0 * 1.038f64.powi(v as i32 - 13)),
+    };
+    Some(Position { lat, lon, speed, heading })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,5 +165,24 @@ mod tests {
         let info = tl_info(&[0x82, 0x04, 0x09, 0x01, b'x']).unwrap();
         assert!(info.report_requested);
         assert_eq!(build_received_report(&info), vec![0x82, 0x10, 0x00, 0x09]);
+    }
+
+    #[test]
+    fn lip_short_report() {
+        // Short report: lon 2.1734 E, lat 41.3851 N, 20 km/h, heading 90°.
+        let lon = (2.1734f64 * (1u32 << 25) as f64 / 360.0).round() as u64;
+        let lat = (41.3851f64 * (1u32 << 24) as f64 / 180.0).round() as u64;
+        let fields = [(0, 2), (0, 2), (lon, 25), (lat, 24), (0, 3), (20, 7), (4, 4), (0, 1), (0, 8)];
+        let mut bits = Vec::new();
+        for (v, n) in fields {
+            bits.extend((0..n).rev().map(|i| (v >> i) & 1 == 1));
+        }
+        let mut data = vec![PID_LIP];
+        data.extend(bits.chunks(8).map(|c| c.iter().enumerate().fold(0u8, |a, (i, &b)| a | (b as u8) << (7 - i))));
+        let p = decode_lip(&data).unwrap();
+        assert!((p.lon - 2.1734).abs() < 1e-4 && (p.lat - 41.3851).abs() < 1e-4);
+        assert_eq!(p.speed, Some(20.0));
+        assert_eq!(p.heading, 90.0);
+        assert_eq!(decode_lip(&[0x82, 0x00, 0x01, 0x01]), None);
     }
 }

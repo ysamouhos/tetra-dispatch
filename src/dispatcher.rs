@@ -6,7 +6,7 @@
 //! [`UiOut`] broadcasts. One console at a time holds the operator position
 //! ("claim"); the others watch.
 
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -159,6 +159,8 @@ pub struct Dispatcher {
     last_error: Option<String>,
     log: VecDeque<Value>,
     sds: VecDeque<Value>,
+    /// Last LIP position per ISSI.
+    positions: BTreeMap<u32, Value>,
     sds_ref: u8,
     /// SHORT_TRANSFER headers waiting for their SDS_TRANSFER frame.
     sds_pending: HashMap<Uuid, (u32, u32)>,
@@ -201,6 +203,7 @@ impl Dispatcher {
             last_error: None,
             log: VecDeque::new(),
             sds: VecDeque::new(),
+            positions: BTreeMap::new(),
             sds_ref: 0,
             sds_pending: HashMap::new(),
         }
@@ -227,7 +230,7 @@ impl Dispatcher {
             },
             Event::ClientJoined(id, label) => {
                 self.clients.insert(id, label);
-                self.send_to(id, json!({"type": "history", "log": self.log, "sds": self.sds}));
+                self.send_to(id, json!({"type": "history", "log": self.log, "sds": self.sds, "positions": self.positions.values().collect::<Vec<_>>()}));
             }
             Event::ClientLeft(id) => {
                 self.clients.remove(&id);
@@ -470,6 +473,15 @@ impl Dispatcher {
         self.send(build_sds_report(&uuid, 0));
         if let Some(info) = sds::tl_info(data).filter(|i| i.report_requested) {
             self.send_sds_raw(source, &sds::build_received_report(&info));
+        }
+        if let Some(p) = sds::decode_lip(data) {
+            debug!("LIP from {source}: {:.5}, {:.5}", p.lat, p.lon);
+            let pos = json!({
+                "issi": source, "lat": p.lat, "lon": p.lon, "speed": p.speed, "heading": p.heading, "ts": epoch_ms(),
+            });
+            self.positions.insert(source, pos.clone());
+            let _ = self.ui.send(UiOut::Text(json!({"type": "position", "pos": pos}).to_string()));
+            return;
         }
         let Some(text) = sds::decode_text(data) else {
             debug!("SDS from {source} to {destination}: not text ({} bytes)", data.len());

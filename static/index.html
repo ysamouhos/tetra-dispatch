@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tetra Dispatch</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
 :root{
   --bg:#f4f5f7;--card:#fff;--fg:#1c2330;--muted:#677185;--line:#dde1e8;
@@ -55,6 +57,9 @@ th{color:var(--muted);font-weight:500}
 .callbox{margin-top:10px;padding:10px;border-radius:8px;background:var(--bg)}
 .span2{grid-column:1/-1}
 .hidden{display:none!important}
+#map{height:420px;border-radius:8px;border:1px solid var(--line);background:var(--bg)}
+.leaflet-tooltip.talk{background:var(--tx);color:#fff;border-color:var(--tx);font-weight:650}
+.leaflet-tooltip.talk::before{border-top-color:var(--tx)}
 .banner{padding:10px 16px;background:var(--warn);color:#fff;text-align:center}
 </style>
 </head>
@@ -121,6 +126,12 @@ th{color:var(--muted);font-weight:500}
   </section>
 
   <section class="card span2">
+    <h2 data-t="map"></h2>
+    <div id="map"></div>
+    <div class="row muted" id="map-info" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card span2">
     <h2 data-t="activity"></h2>
     <div id="log" class="list"></div>
   </section>
@@ -140,7 +151,7 @@ const LANGS={
     insecure:'The microphone needs https:// or localhost. Open the console through a TLS proxy.',
     group_rx:'Group call',group_tx:'Dispatcher transmitted',link_up:'Brew link up',link_down:'Brew link down',
     priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
-    delivered:'delivered',
+    delivered:'delivered',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
     causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
       7:'incompatible',8:'service not supported',9:'pre-empted',10:'invalid identity',11:'SwMI disconnect',12:'no idle cc',
       13:'timeout',14:'SwMI disconnect'}},
@@ -156,7 +167,7 @@ const LANGS={
     insecure:'El micrófono necesita https:// o localhost. Abre la consola a través de un proxy TLS.',
     group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
     priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
-    delivered:'entregado',
+    delivered:'entregado',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
     causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
       7:'incompatible',8:'servicio no soportado',9:'expulsado',10:'identidad no válida',11:'desconexión de red',12:'sin canal',
       13:'tiempo agotado',14:'desconexión de red'}},
@@ -178,7 +189,7 @@ $('theme').onclick=()=>{const cur=document.documentElement.dataset.theme||(match
 $('lang').onchange=e=>{lang=e.target.value;try{localStorage.setItem('td_lang',lang)}catch(_){}applyLang()};
 
 // ── WebSocket ────────────────────────────────────────────────────────
-let ws=null,wsUp=false,st={},logs=[],sdsMsgs=[],flash='';
+let ws=null,wsUp=false,st={},logs=[],sdsMsgs=[],positions={},flash='';
 function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
 function connect(){
   ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
@@ -189,7 +200,8 @@ function connect(){
     if(typeof ev.data!=='string'){playPcm(new Int16Array(ev.data));return}
     const m=JSON.parse(ev.data);
     if(m.type==='status'){const wasOp=st.you_operate;st=m;if(wasOp&&!m.you_operate)stopAudio();render()}
-    else if(m.type==='history'){logs=m.log||[];sdsMsgs=m.sds||[];renderLog();renderSds()}
+    else if(m.type==='history'){logs=m.log||[];sdsMsgs=m.sds||[];positions={};(m.positions||[]).forEach(p=>positions[p.issi]=p);renderLog();renderSds();renderMap()}
+    else if(m.type==='position'){positions[m.pos.issi]=m.pos;renderMap()}
     else if(m.type==='log'){logs.push(m.entry);if(logs.length>100)logs.shift();renderLog()}
     else if(m.type==='sds'){sdsMsgs.push(m.msg);if(sdsMsgs.length>100)sdsMsgs.shift();renderSds()}
     else if(m.type==='error'){flash=t(m.error==='busy'?'busy_pos':'not_op');render()}
@@ -292,6 +304,35 @@ function renderSds(){
   $('sds-list').innerHTML=sdsMsgs.slice().reverse().map(m=>`<div class="msg"><div class="meta">${hhmm(m.ts)} · ${m.dir==='in'?esc(m.from)+' → '+esc(m.to):'→ '+esc(m.to)}${m.delivered?' · ✓ '+t('delivered'):''}</div>${esc(m.text)}</div>`).join('');
 }
 
+// ── Map ──────────────────────────────────────────────────────────────
+let map=null,markers={},fitted=false;
+function initMap(){
+  if(!window.L){$('map').textContent=t('no_map');return}
+  map=L.map('map',{worldCopyJump:true}).setView([40.4,-3.7],6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+}
+function renderMap(){
+  // Talker ISSI → talkgroup, from the calls on listened groups.
+  const talking={};(st.active||[]).forEach(a=>talking[a.source]=a.gssi);
+  const css=getComputedStyle(document.documentElement),txc=css.getPropertyValue('--tx').trim(),acc=css.getPropertyValue('--accent').trim();
+  const nopos=Object.keys(talking).filter(i=>!positions[i]);
+  $('map-info').textContent=t('radios')+Object.keys(positions).length+(nopos.length?' · '+t('talking_nopos')+nopos.map(i=>i+' (TG '+talking[i]+')').join(', '):'');
+  if(!map)return;
+  for(const [issi,p] of Object.entries(positions)){
+    const tg=talking[issi],tip=tg!=null?`${issi} · TG ${tg}`:String(issi);
+    let m=markers[issi];
+    if(!m){m=markers[issi]=L.circleMarker([p.lat,p.lon]).addTo(map)}
+    m.setLatLng([p.lat,p.lon]);
+    m.setStyle({radius:tg!=null?11:7,color:tg!=null?txc:acc,fillColor:tg!=null?txc:acc,fillOpacity:tg!=null?.9:.6,weight:tg!=null?3:2});
+    m.unbindTooltip().bindTooltip(tip,{permanent:tg!=null,direction:'top',offset:[0,-8],className:tg!=null?'talk':''});
+    if(tg!=null)m.bringToFront();
+    m.unbindPopup().bindPopup(`<b>ISSI ${esc(issi)}</b>${tg!=null?'<br>TG '+esc(tg):''}<br>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`+
+      (p.speed!=null?`<br>${Math.round(p.speed)} km/h · ${p.heading}°`:'')+`<br>${hhmm(p.ts)}`);
+  }
+  const pts=Object.values(positions);
+  if(!fitted&&pts.length){fitted=true;map.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lon])).pad(.2),{maxZoom:15})}
+}
+
 // ── Rendering ────────────────────────────────────────────────────────
 function causeText(c){return (LANGS[lang].causes||LANGS.en.causes)[c]||String(c)}
 function fmtSecs(s){s=Math.max(0,s|0);return String(s/60|0).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
@@ -354,10 +395,12 @@ function render(){
     $('answer').disabled=$('hangup').disabled=!op;
   }
   tickTimer();
+  renderMap();
 }
 function tickTimer(){const p=st.private;$('call-timer').textContent=p&&p.connected_ms?fmtSecs((Date.now()-p.connected_ms)/1000):''}
 setInterval(tickTimer,1000);
 if(!window.isSecureContext)$('insecure').classList.remove('hidden');
+initMap();
 applyLang();
 connect();
 </script>
