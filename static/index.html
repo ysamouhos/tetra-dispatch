@@ -105,6 +105,12 @@ th{color:var(--muted);font-weight:500}
     </div>
   </section>
 
+  <section class="card span2">
+    <h2 data-t="map"></h2>
+    <div id="map"></div>
+    <div class="row muted" id="map-info" style="margin-top:8px"></div>
+  </section>
+
   <section class="card">
     <h2 data-t="groups"></h2>
     <table><thead><tr><th>GSSI</th><th data-t="listen"></th><th data-t="tx"></th><th></th></tr></thead><tbody id="tgs"></tbody></table>
@@ -123,12 +129,6 @@ th{color:var(--muted);font-weight:500}
       <button id="sds-send" class="primary" data-t="send"></button>
     </div>
     <div id="sds-list" class="list" style="margin-top:8px"></div>
-  </section>
-
-  <section class="card span2">
-    <h2 data-t="map"></h2>
-    <div id="map"></div>
-    <div class="row muted" id="map-info" style="margin-top:8px"></div>
   </section>
 
   <section class="card span2">
@@ -308,7 +308,10 @@ function renderSds(){
 let map=null,markers={},fitted=false;
 function initMap(){
   if(!window.L){$('map').textContent=t('no_map');return}
-  map=L.map('map',{worldCopyJump:true}).setView([40.4,-3.7],6);
+  map=L.map('map',{worldCopyJump:true}).setView([50,10],4);
+  // Start at the browser's location until radio positions arrive; Europe otherwise.
+  if(navigator.geolocation)navigator.geolocation.getCurrentPosition(
+    g=>{if(!fitted)map.setView([g.coords.latitude,g.coords.longitude],11)},()=>{},{maximumAge:600000,timeout:10000});
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
 }
 function renderMap(){
