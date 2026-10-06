@@ -78,6 +78,155 @@ pub fn decode_text(data: &[u8]) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+/// Location Information Protocol (ETSI TS 100 392-18-1), plain and over SDS-TL.
+pub const PID_LIP: u8 = 0x0A;
+pub const PID_LIP_TL: u8 = 0x83;
+
+/// Position from a LIP short or long location report.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Position {
+    pub lat: f64,
+    pub lon: f64,
+    /// km/h, `None` when the radio reports it unknown.
+    pub speed: Option<f64>,
+    /// Degrees from north, `None` when not reported.
+    pub heading: Option<f64>,
+}
+
+/// LIP "Immediate location report request" asking for one short location
+/// report (ETSI TS 100 392-18-1). Sent as a plain LIP SDS (PID 0x0A); the
+/// radio answers the requesting ISSI with a short (or, depending on its
+/// configuration, long) location report, both of which [`decode_lip`] reads.
+/// The console drives periodic polling on its own timer.
+pub fn encode_location_request() -> Vec<u8> {
+    let bits: &[(u32, usize)] = &[
+        (0b01, 2),   // PDU type: location protocol PDU with extension
+        (0b0001, 4), // PDU type extension: immediate location report request
+        (0b00, 2),   // report type: short location report
+        (0b0, 1),    // O-bit: no optional elements
+    ];
+    let mut acc = 0u32;
+    let mut n = 0usize;
+    for &(v, w) in bits {
+        acc = (acc << w) | v;
+        n += w;
+    }
+    acc <<= (8 - n % 8) % 8; // left-align into whole bytes
+    let bytes = n.div_ceil(8);
+    let mut out = vec![PID_LIP];
+    out.extend((0..bytes).rev().map(|i| (acc >> (i * 8)) as u8));
+    out
+}
+
+struct Bits<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl Bits<'_> {
+    fn take(&mut self, n: usize) -> Option<u32> {
+        let mut v = 0u32;
+        for _ in 0..n {
+            let byte = *self.data.get(self.pos / 8)?;
+            v = (v << 1) | ((byte >> (7 - self.pos % 8)) & 1) as u32;
+            self.pos += 1;
+        }
+        Some(v)
+    }
+}
+
+fn signed(v: u32, bits: u32) -> i32 {
+    ((v << (32 - bits)) as i32) >> (32 - bits)
+}
+
+/// Horizontal velocity (7 bits) in km/h, `None` when unknown.
+fn velocity(v: u32) -> Option<f64> {
+    match v {
+        0..=28 => Some(v as f64),
+        127 => None,
+        _ => Some(16.0 * 1.038f64.powi(v as i32 - 13)),
+    }
+}
+
+/// Longitude and latitude, `None` for 0,0: radios without a fix report zeros.
+fn lon_lat(b: &mut Bits) -> Option<(f64, f64)> {
+    let (lon, lat) = (b.take(25)?, b.take(24)?);
+    if lon == 0 && lat == 0 {
+        return None;
+    }
+    let lon = signed(lon, 25) as f64 * 360.0 / (1u32 << 25) as f64;
+    let lat = signed(lat, 24) as f64 * 180.0 / (1u32 << 24) as f64;
+    Some((lon, lat))
+}
+
+/// Position of a LIP short or long location report, `None` for anything else.
+pub fn decode_lip(data: &[u8]) -> Option<Position> {
+    let pdu = match *data.first()? {
+        PID_LIP => &data[1..],
+        PID_LIP_TL => {
+            let info = tl_info(data)?;
+            if !info.is_transfer || data[1] & 0x01 != 0 {
+                return None;
+            }
+            data.get(3..)?
+        }
+        _ => return None,
+    };
+    let mut b = Bits { data: pdu, pos: 0 };
+    match b.take(2)? {
+        0 => decode_short(&mut b),
+        // PDU type extension 3: long location report.
+        1 if b.take(4)? == 3 => decode_long(&mut b),
+        _ => None,
+    }
+}
+
+fn decode_short(b: &mut Bits) -> Option<Position> {
+    b.take(2)?; // time elapsed
+    let (lon, lat) = lon_lat(b)?;
+    b.take(3)?; // position error
+    let speed = velocity(b.take(7)?);
+    let heading = Some(b.take(4)? as f64 * 22.5);
+    Some(Position { lat, lon, speed, heading })
+}
+
+fn decode_long(b: &mut Bits) -> Option<Position> {
+    match b.take(2)? {
+        0 => {}
+        1 => _ = b.take(2)?,  // time elapsed
+        2 => _ = b.take(22)?, // time of position: day, hour, minute, second
+        _ => return None,
+    }
+    let shape = b.take(4)?;
+    // Bits each location shape carries after longitude and latitude.
+    let extra = match shape {
+        1 => 0,  // point
+        2 => 6,  // circle: uncertainty
+        3 => 22, // ellipse: half axes, angle, confidence
+        4 => 12, // point with altitude
+        5 => 18, // circle with altitude
+        6 => 37, // ellipse with altitude
+        7 => 24, // circle with altitude and altitude uncertainty
+        8 => 37, // ellipse with altitude and altitude uncertainty
+        9 => 51, // arc
+        10 => 3, // point with position error
+        _ => return None, // no shape, or reserved
+    };
+    let (lon, lat) = lon_lat(b)?;
+    let mut pos = Position { lat, lon, speed: None, heading: None };
+    // Velocity is optional detail: a report cut short still gives a position.
+    if b.take(extra).is_some() {
+        if let Some(vtype) = b.take(3).filter(|&t| t != 0) {
+            pos.speed = b.take(7).and_then(velocity);
+            // Type 5: horizontal velocity with extended direction of travel.
+            if vtype == 5 {
+                pos.heading = b.take(8).map(|d| d as f64 * 360.0 / 256.0);
+            }
+        }
+    }
+    Some(pos)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,5 +247,59 @@ mod tests {
         let info = tl_info(&[0x82, 0x04, 0x09, 0x01, b'x']).unwrap();
         assert!(info.report_requested);
         assert_eq!(build_received_report(&info), vec![0x82, 0x10, 0x00, 0x09]);
+    }
+
+    #[test]
+    fn lip_short_report() {
+        // Short report: lon 2.1734 E, lat 41.3851 N, 20 km/h, heading 90°.
+        let lon = (2.1734f64 * (1u32 << 25) as f64 / 360.0).round() as u64;
+        let lat = (41.3851f64 * (1u32 << 24) as f64 / 180.0).round() as u64;
+        let fields = [(0, 2), (0, 2), (lon, 25), (lat, 24), (0, 3), (20, 7), (4, 4), (0, 1), (0, 8)];
+        let mut bits = Vec::new();
+        for (v, n) in fields {
+            bits.extend((0..n).rev().map(|i| (v >> i) & 1 == 1));
+        }
+        let mut data = vec![PID_LIP];
+        data.extend(bits.chunks(8).map(|c| c.iter().enumerate().fold(0u8, |a, (i, &b)| a | (b as u8) << (7 - i))));
+        let p = decode_lip(&data).unwrap();
+        assert!((p.lon - 2.1734).abs() < 1e-4 && (p.lat - 41.3851).abs() < 1e-4);
+        assert_eq!(p.speed, Some(20.0));
+        assert_eq!(p.heading, Some(90.0));
+        assert_eq!(decode_lip(&[0x82, 0x00, 0x01, 0x01]), None);
+    }
+
+    fn pack(fields: &[(u64, usize)]) -> Vec<u8> {
+        let mut bits = Vec::new();
+        for &(v, n) in fields {
+            bits.extend((0..n).rev().map(|i| (v >> i) & 1 == 1));
+        }
+        let mut data = vec![PID_LIP];
+        data.extend(bits.chunks(8).map(|c| c.iter().enumerate().fold(0u8, |a, (i, &b)| a | (b as u8) << (7 - i))));
+        data
+    }
+
+    #[test]
+    fn lip_long_report() {
+        let lon = (-3.7038f64 * (1u32 << 25) as f64 / 360.0).round() as i64 as u64 & 0x1FF_FFFF;
+        let lat = (40.4168f64 * (1u32 << 24) as f64 / 180.0).round() as u64;
+        // Long report, time of position, circle shape, velocity type 5 (20 km/h, 180°).
+        let data = pack(&[
+            (1, 2), (3, 4), (2, 2), (0, 22), (2, 4), (lon, 25), (lat, 24), (5, 6),
+            (5, 3), (20, 7), (128, 8), (0, 1), (0, 8),
+        ]);
+        let p = decode_lip(&data).unwrap();
+        assert!((p.lon + 3.7038).abs() < 1e-4 && (p.lat - 40.4168).abs() < 1e-4);
+        assert_eq!(p.speed, Some(20.0));
+        assert_eq!(p.heading, Some(180.0));
+        // Point shape without velocity data still gives a position.
+        let p = decode_lip(&pack(&[(1, 2), (3, 4), (0, 2), (1, 4), (lon, 25), (lat, 24)])).unwrap();
+        assert!((p.lat - 40.4168).abs() < 1e-4 && p.speed.is_none() && p.heading.is_none());
+        // A location request is a LIP PDU, but not a report → no position.
+        let req = encode_location_request();
+        assert_eq!(req, vec![PID_LIP, 0x44, 0x00]); // 01 0001 00 0, zero-padded
+        assert_eq!(decode_lip(&req), None);
+        // No fix: zero coordinates are not a position.
+        assert_eq!(decode_lip(&pack(&[(1, 2), (3, 4), (0, 2), (1, 4), (0, 25), (0, 24)])), None);
+        assert_eq!(decode_lip(&pack(&[(0, 2), (0, 2), (0, 25), (0, 24), (0, 3), (0, 7), (0, 4), (0, 9)])), None);
     }
 }

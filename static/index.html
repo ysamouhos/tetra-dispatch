@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tetra Dispatch</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
 :root{
   --bg:#f4f5f7;--card:#fff;--fg:#1c2330;--muted:#677185;--line:#dde1e8;
@@ -20,6 +22,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-appl
 header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}
 header h1{font-size:17px;margin:0;font-weight:650}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);font-size:13px;color:var(--muted)}
+a.pill{text-decoration:none;color:var(--fg)}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}
 .on .dot{background:var(--ok)} .off .dot{background:var(--bad)}
 .grow{flex:1}
@@ -31,6 +34,7 @@ button{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid var(--li
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 button.danger{background:var(--bad);border-color:var(--bad);color:#fff}
 button.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+button.amb{background:#8b0000;border-color:#8b0000;color:#fff}
 button:disabled{opacity:.45;cursor:not-allowed}
 input,select{font:inherit;padding:7px 9px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg);min-width:0}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -55,6 +59,12 @@ th{color:var(--muted);font-weight:500}
 .callbox{margin-top:10px;padding:10px;border-radius:8px;background:var(--bg)}
 .span2{grid-column:1/-1}
 .hidden{display:none!important}
+#map{height:420px;border-radius:8px;border:1px solid var(--line);background:var(--bg)}
+.radio-icon{background:none;border:0;color:var(--accent);filter:drop-shadow(0 1px 1px rgba(0,0,0,.45))}
+.radio-icon.talking{color:var(--tx)}
+.radio-icon svg{display:block;width:100%;height:100%}
+.leaflet-tooltip.talk{background:var(--tx);color:#fff;border-color:var(--tx);font-weight:650}
+.leaflet-tooltip.talk::before{border-top-color:var(--tx)}
 .banner{padding:10px 16px;background:var(--warn);color:#fff;text-align:center}
 </style>
 </head>
@@ -64,15 +74,17 @@ th{color:var(--muted);font-weight:500}
   <span id="link" class="pill off"><span class="dot"></span><span id="link-text"></span></span>
   <span class="pill"><span data-t="issi"></span>&nbsp;<b id="issi">—</b></span>
   <span class="grow"></span>
+  <a href="/log" target="_blank" class="pill" data-t="logs"></a>
   <span id="opinfo" class="muted"></span>
   <button id="claim" class="primary" data-t="claim"></button>
   <button id="release" class="hidden" data-t="release"></button>
   <select id="lang" aria-label="Language"><option value="es">ES</option><option value="en">EN</option></select>
   <button id="theme" title="Theme">◐</button>
+  <span class="muted" id="version" title="Version">v__VERSION__</span>
 </header>
 <div id="insecure" class="banner hidden" data-t="insecure"></div>
 <main>
-  <section class="card">
+  <section class="card" style="grid-row:span 2">
     <h2 data-t="talk"></h2>
     <div class="row">
       <label class="muted" for="txsel" data-t="tx_group"></label>
@@ -86,9 +98,12 @@ th{color:var(--muted);font-weight:500}
   <section class="card">
     <h2 data-t="private"></h2>
     <div class="row">
-      <input id="dial" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI" style="width:140px">
+      <input id="dial" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI" style="width:100px">
       <button id="call-duplex" class="ok" data-t="call_duplex"></button>
       <button id="call-simplex" data-t="call_simplex"></button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="call-ambience" class="amb" data-t="ambience" title=""></button>
     </div>
     <div id="callbox" class="callbox hidden">
       <div class="row"><span id="call-dir" class="muted"></span><b id="call-peer" class="big"></b><span id="call-kind" class="pill"></span></div>
@@ -98,6 +113,25 @@ th{color:var(--muted);font-weight:500}
         <button id="hangup" class="danger" data-t="hangup"></button>
       </div>
     </div>
+  </section>
+
+  <section class="card">
+    <h2 data-t="locate"></h2>
+    <div class="row">
+      <input id="loc-issi" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI" style="width:100px">
+      <button id="loc-once" data-t="loc_once"></button>
+      <label class="muted" for="loc-period" data-t="loc_every"></label>
+      <input id="loc-period" type="number" min="5" max="86400" value="30" style="width:70px">
+      <span class="muted" data-t="seconds"></span>
+      <button id="loc-poll" data-t="loc_poll"></button>
+    </div>
+    <div class="row muted" id="polls" style="margin-top:6px"></div>
+  </section>
+
+  <section class="card span2">
+    <h2 data-t="map"></h2>
+    <div id="map"></div>
+    <div class="row muted" id="map-info" style="margin-top:8px"></div>
   </section>
 
   <section class="card">
@@ -138,9 +172,9 @@ const LANGS={
     answering:'Connecting…',connected_call:'Connected',ended:'Call ended',failed:'Call failed',duplex:'duplex',simplex:'simplex',
     remove:'Remove',active:'Active: ',preempt:'Busy — press again to transmit over it',mic_fail:'Microphone unavailable: ',
     insecure:'The microphone needs https:// or localhost. Open the console through a TLS proxy.',
-    group_rx:'Group call',group_tx:'Dispatcher transmitted',link_up:'Brew link up',link_down:'Brew link down',
+    group_rx:'Group call',group_tx:'Dispatcher transmitted',loc_req_once:'Location requested',loc_req_poll:'Location polling started',loc_req_stop:'Location polling stopped',link_up:'Brew link up',link_down:'Brew link down',
     priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
-    delivered:'delivered',
+    delivered:'delivered',logs:'Logs',ambience:'Ambient listen',amb_hint:'Open a listening call to the radio. The radio shows the call — this is not covert. The brew-server only relays the call, so it works only if the radio/basestation supports ambience listening.',ambience_call:'Ambient Listen Call',locate:'Locate',loc_once:'Locate once',loc_every:'every',seconds:'s',loc_poll:'Start polling',loc_stop:'Stop',polling:'Polling: ',listen_only:'Listening (radio talks)',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
     causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
       7:'incompatible',8:'service not supported',9:'pre-empted',10:'invalid identity',11:'SwMI disconnect',12:'no idle cc',
       13:'timeout',14:'SwMI disconnect'}},
@@ -154,9 +188,9 @@ const LANGS={
     answering:'Conectando…',connected_call:'Conectada',ended:'Llamada finalizada',failed:'Llamada fallida',duplex:'dúplex',simplex:'símplex',
     remove:'Quitar',active:'Activos: ',preempt:'Ocupado — pulsa otra vez para transmitir encima',mic_fail:'Micrófono no disponible: ',
     insecure:'El micrófono necesita https:// o localhost. Abre la consola a través de un proxy TLS.',
-    group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
+    group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',loc_req_once:'Localización solicitada',loc_req_poll:'Sondeo de localización iniciado',loc_req_stop:'Sondeo de localización detenido',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
     priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
-    delivered:'entregado',
+    delivered:'entregado',logs:'Registros',ambience:'Escucha ambiente',amb_hint:'Abre una llamada de escucha a la radio. La radio muestra la llamada — no es encubierto. El brew-server solo reenvía la llamada, así que funciona solo si la radio/estación base admite escucha ambiente.',ambience_call:'Llamada de escucha ambiente',locate:'Localización',loc_once:'Localizar',loc_every:'cada',seconds:'s',loc_poll:'Sondear',loc_stop:'Parar',polling:'Sondeando: ',listen_only:'Escuchando (habla la radio)',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
     causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
       7:'incompatible',8:'servicio no soportado',9:'expulsado',10:'identidad no válida',11:'desconexión de red',12:'sin canal',
       13:'tiempo agotado',14:'desconexión de red'}},
@@ -169,6 +203,7 @@ function applyLang(){
   document.documentElement.lang=lang;$('lang').value=lang;
   document.querySelectorAll('[data-t]').forEach(e=>e.textContent=t(e.dataset.t));
   document.querySelectorAll('[data-tp]').forEach(e=>e.placeholder=t(e.dataset.tp));
+  $('call-ambience').title=t('amb_hint');
   render();renderLog();renderSds();
 }
 function setTheme(th){if(th)document.documentElement.dataset.theme=th;else delete document.documentElement.dataset.theme}
@@ -178,7 +213,7 @@ $('theme').onclick=()=>{const cur=document.documentElement.dataset.theme||(match
 $('lang').onchange=e=>{lang=e.target.value;try{localStorage.setItem('td_lang',lang)}catch(_){}applyLang()};
 
 // ── WebSocket ────────────────────────────────────────────────────────
-let ws=null,wsUp=false,st={},logs=[],sdsMsgs=[],flash='';
+let ws=null,wsUp=false,st={},logs=[],sdsMsgs=[],positions={},flash='';
 function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
 function connect(){
   ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
@@ -189,7 +224,8 @@ function connect(){
     if(typeof ev.data!=='string'){playPcm(new Int16Array(ev.data));return}
     const m=JSON.parse(ev.data);
     if(m.type==='status'){const wasOp=st.you_operate;st=m;if(wasOp&&!m.you_operate)stopAudio();render()}
-    else if(m.type==='history'){logs=m.log||[];sdsMsgs=m.sds||[];renderLog();renderSds()}
+    else if(m.type==='history'){logs=(m.log||[]).slice(-100);sdsMsgs=(m.sds||[]).slice(-100);positions={};(m.positions||[]).forEach(p=>positions[p.issi]=p);renderLog();renderSds();renderMap()}
+    else if(m.type==='position'){positions[m.pos.issi]=m.pos;renderMap()}
     else if(m.type==='log'){logs.push(m.entry);if(logs.length>100)logs.shift();renderLog()}
     else if(m.type==='sds'){sdsMsgs.push(m.msg);if(sdsMsgs.length>100)sdsMsgs.shift();renderSds()}
     else if(m.type==='error'){flash=t(m.error==='busy'?'busy_pos':'not_op');render()}
@@ -281,6 +317,12 @@ $('tgs').addEventListener('click',e=>{const g=parseInt(e.target.dataset.rm,10);i
 // ── Private calls ────────────────────────────────────────────────────
 function dial(duplex){const n=parseInt($('dial').value,10);if(!(n>0))return;flash='';send({type:'call',issi:n,duplex:duplex})}
 $('call-duplex').onclick=()=>dial(true);$('call-simplex').onclick=()=>dial(false);
+$('call-ambience').onclick=()=>{const n=parseInt($('dial').value,10);if(!(n>0))return;flash='';send({type:'ambience',issi:n})};
+function locate(n,period){if(!(n>0))return;send({type:'locate',issi:n,period_s:period})}
+$('loc-once').onclick=()=>locate(parseInt($('loc-issi').value,10),0);
+$('loc-poll').onclick=()=>locate(parseInt($('loc-issi').value,10),Math.max(5,parseInt($('loc-period').value,10)||30));
+$('polls').addEventListener('click',e=>{const i=parseInt(e.target.dataset.stop,10);if(i)send({type:'locate_stop',issi:i})});
+$('map').addEventListener('click',e=>{const b=e.target.closest('[data-loc]');if(b)locate(parseInt(b.dataset.loc,10),0)});
 $('answer').onclick=()=>send({type:'answer'});$('hangup').onclick=()=>send({type:'hangup'});
 
 // ── SDS ──────────────────────────────────────────────────────────────
@@ -292,6 +334,46 @@ function renderSds(){
   $('sds-list').innerHTML=sdsMsgs.slice().reverse().map(m=>`<div class="msg"><div class="meta">${hhmm(m.ts)} · ${m.dir==='in'?esc(m.from)+' → '+esc(m.to):'→ '+esc(m.to)}${m.delivered?' · ✓ '+t('delivered'):''}</div>${esc(m.text)}</div>`).join('');
 }
 
+// ── Map ──────────────────────────────────────────────────────────────
+let map=null,markers={},fitted=false;
+function initMap(){
+  if(!window.L){$('map').textContent=t('no_map');return}
+  map=L.map('map',{worldCopyJump:true}).setView([50,10],4);
+  // Start at the browser's location until radio positions arrive; Europe otherwise.
+  if(navigator.geolocation)navigator.geolocation.getCurrentPosition(
+    g=>{if(!fitted)map.setView([g.coords.latitude,g.coords.longitude],11)},()=>{},{maximumAge:600000,timeout:10000});
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+}
+// Handheld radio: antenna, body, display and keypad; colour from CSS (currentColor).
+const RADIO_SVG='<svg viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg"><rect x="15" y="1" width="3" height="11" rx="1.5" fill="currentColor" stroke="#fff" stroke-width="1"/>'+
+  '<rect x="4" y="9" width="16" height="26" rx="3" fill="currentColor" stroke="#fff" stroke-width="1.5"/><rect x="7" y="12.5" width="10" height="7" rx="1" fill="#fff" opacity=".9"/>'+
+  '<g fill="#fff" opacity=".85"><circle cx="8.5" cy="23.5" r="1.1"/><circle cx="12" cy="23.5" r="1.1"/><circle cx="15.5" cy="23.5" r="1.1"/>'+
+  '<circle cx="8.5" cy="27" r="1.1"/><circle cx="12" cy="27" r="1.1"/><circle cx="15.5" cy="27" r="1.1"/><circle cx="8.5" cy="30.5" r="1.1"/><circle cx="12" cy="30.5" r="1.1"/><circle cx="15.5" cy="30.5" r="1.1"/></g></svg>';
+function radioIcon(talking){const w=talking?28:20,h=talking?42:30;
+  return L.divIcon({html:RADIO_SVG,className:'radio-icon'+(talking?' talking':''),iconSize:[w,h],iconAnchor:[w/2,h/2]})}
+function renderMap(){
+  // Talker ISSI → talkgroup, from the calls on listened groups.
+  const talking={};(st.active||[]).forEach(a=>talking[a.source]=a.gssi);
+  const nopos=Object.keys(talking).filter(i=>!positions[i]);
+  $('map-info').textContent=t('radios')+Object.keys(positions).length+(nopos.length?' · '+t('talking_nopos')+nopos.map(i=>i+' (TG '+talking[i]+')').join(', '):'');
+  const polls=st.polls||[];
+  $('polls').innerHTML=polls.length?t('polling')+polls.map(p=>`${esc(p.issi)} (${esc(p.period_s)}s) <button data-stop="${esc(p.issi)}">${t('loc_stop')}</button>`).join(' '):'';
+  if(!map)return;
+  for(const [issi,p] of Object.entries(positions)){
+    const tg=talking[issi],tip=tg!=null?`${issi} · TG ${tg}`:String(issi);
+    let m=markers[issi];
+    if(!m){m=markers[issi]=L.marker([p.lat,p.lon]).addTo(map)}
+    m.setLatLng([p.lat,p.lon]);
+    if(m.talking!==(tg!=null)){m.talking=tg!=null;m.setIcon(radioIcon(m.talking));m.setZIndexOffset(m.talking?1000:0)}
+    m.unbindTooltip().bindTooltip(tip,{permanent:tg!=null,direction:'top',offset:[0,tg!=null?-24:-18],className:tg!=null?'talk':''});
+    m.unbindPopup().bindPopup(`<b>ISSI ${esc(issi)}</b>${tg!=null?'<br>TG '+esc(tg):''}<br>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`+
+      (p.speed!=null?`<br>${Math.round(p.speed)} km/h`+(p.heading!=null?` · ${Math.round(p.heading)}°`:''):'')+`<br>${hhmm(p.ts)}`+
+      `<br><button data-loc="${esc(issi)}" style="margin-top:6px">${t('loc_once')}</button>`);
+  }
+  const pts=Object.values(positions);
+  if(!fitted&&pts.length){fitted=true;map.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lon])).pad(.2),{maxZoom:15})}
+}
+
 // ── Rendering ────────────────────────────────────────────────────────
 function causeText(c){return (LANGS[lang].causes||LANGS.en.causes)[c]||String(c)}
 function fmtSecs(s){s=Math.max(0,s|0);return String(s/60|0).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
@@ -301,6 +383,7 @@ function renderLog(){
     if(e.kind==='group_rx')txt=`${t('group_rx')} ${esc(e.gssi)} · ${esc(e.source)}`;
     else if(e.kind==='group_tx')txt=`${t('group_tx')} · ${esc(e.gssi)}`;
     else if(e.kind==='link')txt=e.up?t('link_up'):t('link_down')+(e.reason?' · '+esc(e.reason):'');
+    else if(e.kind==='location_req')txt=(e.period_s?t('loc_req_poll')+` · ${e.period_s}s`:t('loc_req_once'))+` · ${esc(e.issi)}`;
     else if(e.kind==='private'){txt=t('priv_'+e.event)+` ${e.dir==='in'?'←':'→'} ${esc(e.peer)}`;
       if(e.secs!=null)txt+=` · ${fmtSecs(e.secs)}`;if(e.event!=='connected'&&e.cause!=null)txt+=` · ${causeText(e.cause)}`}
     return `<div class="msg"><span class="meta">${hhmm(e.ts)}</span> ${txt}</div>`}).join('');
@@ -315,7 +398,7 @@ function render(){
   $('claim').classList.toggle('hidden',op);$('release').classList.toggle('hidden',!op);
   $('claim').disabled=!wsUp;
   $('opinfo').textContent=t('operator')+(op?t('you'):(st.operator||t('none')));
-  document.querySelectorAll('#ptt,#call-duplex,#call-simplex,#tg-add,#sds-send,#txsel').forEach(b=>b.disabled=!op);
+  document.querySelectorAll('#ptt,#call-duplex,#call-simplex,#call-ambience,#tg-add,#sds-send,#txsel,#loc-once,#loc-poll').forEach(b=>b.disabled=!op);
 
   // Talkgroups
   const groups=knownGroups(),listen=new Set(st.listen||[]);
@@ -333,6 +416,7 @@ function render(){
   ptt.classList.toggle('rx',!tx&&(!!st.rx||(inCall&&p.peer_talking)));
   let sub=t('hold');
   if(st.transmitting!=null)sub=`${t('transmitting')} ${t('on_tg')} ${st.transmitting}`;
+  else if(inCall&&p.ambience)sub=t('listen_only');
   else if(inCall&&!p.duplex)sub=p.talking?t('transmitting'):p.peer_talking?t('peer_talking'):t('hold');
   else if(st.preempt_offer)sub=t('preempt');
   $('ptt-sub').textContent=sub;
@@ -346,7 +430,7 @@ function render(){
   if(p){
     $('call-dir').textContent=p.inbound?t('incoming'):t('outgoing');
     $('call-peer').textContent=p.peer;
-    $('call-kind').textContent=p.duplex?t('duplex'):t('simplex');
+    $('call-kind').textContent=p.ambience?t('ambience_call'):p.duplex?t('duplex'):t('simplex');
     const ph={dialing:'dialing',alerting:'alerting',ringing:'ringing',answering:'answering',connected:'connected_call',ended:'ended',failed:'failed'}[p.phase]||p.phase;
     $('call-phase').textContent=t(ph)+(p.cause!=null&&(p.phase==='ended'||p.phase==='failed')?' · '+causeText(p.cause):'');
     $('answer').classList.toggle('hidden',!(p.inbound&&p.phase==='ringing'));
@@ -354,10 +438,12 @@ function render(){
     $('answer').disabled=$('hangup').disabled=!op;
   }
   tickTimer();
+  renderMap();
 }
 function tickTimer(){const p=st.private;$('call-timer').textContent=p&&p.connected_ms?fmtSecs((Date.now()-p.connected_ms)/1000):''}
 setInterval(tickTimer,1000);
 if(!window.isSecureContext)$('insecure').classList.remove('hidden');
+initMap();
 applyLang();
 connect();
 </script>

@@ -23,6 +23,7 @@ use crate::config::WebConfig;
 use crate::dispatcher::{ClientId, Event, UiCmd, UiOut};
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
+const LOG_HTML: &str = include_str!("../static/log.html");
 /// Longest microphone chunk accepted in one message (1 s).
 const MAX_PCM_SAMPLES: usize = 8_000;
 
@@ -38,6 +39,7 @@ pub async fn run(cfg: WebConfig, events: mpsc::Sender<Event>, ui: broadcast::Sen
     let state = AppState { events, ui, password: Arc::new(cfg.password.clone()), next_id: Arc::new(AtomicU64::new(1)) };
     let app = Router::new()
         .route("/", get(index))
+        .route("/log", get(log_page))
         .route("/ws", get(ws_upgrade))
         .route("/healthz", get(|| async { "ok\n" }))
         .with_state(state);
@@ -90,7 +92,15 @@ async fn index(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if !authorized(&state, &headers) {
         return challenge();
     }
-    ([(header::CACHE_CONTROL, "no-store")], Html(INDEX_HTML)).into_response()
+    let html = INDEX_HTML.replace("__VERSION__", env!("CARGO_PKG_VERSION"));
+    ([(header::CACHE_CONTROL, "no-store")], Html(html)).into_response()
+}
+
+async fn log_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !authorized(&state, &headers) {
+        return challenge();
+    }
+    ([(header::CACHE_CONTROL, "no-store")], Html(LOG_HTML)).into_response()
 }
 
 async fn ws_upgrade(
@@ -174,6 +184,12 @@ fn parse_command(text: &str) -> Option<UiCmd> {
         "answer" => UiCmd::Answer,
         "hangup" => UiCmd::Hangup,
         "sds" => UiCmd::Sds { dest: ssi(&v, "to"), text: v.get("text")?.as_str()?.to_string() },
+        "ambience" => UiCmd::AmbienceListen { issi: ssi(&v, "issi") },
+        "locate" => UiCmd::LocationRequest {
+            issi: ssi(&v, "issi"),
+            period_s: v.get("period_s").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(0),
+        },
+        "locate_stop" => UiCmd::LocationStop { issi: ssi(&v, "issi") },
         _ => return None,
     })
 }
