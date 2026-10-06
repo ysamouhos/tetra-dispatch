@@ -92,7 +92,8 @@ async fn index(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if !authorized(&state, &headers) {
         return challenge();
     }
-    ([(header::CACHE_CONTROL, "no-store")], Html(INDEX_HTML)).into_response()
+    let html = INDEX_HTML.replace("__VERSION__", env!("CARGO_PKG_VERSION"));
+    ([(header::CACHE_CONTROL, "no-store")], Html(html)).into_response()
 }
 
 async fn log_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
