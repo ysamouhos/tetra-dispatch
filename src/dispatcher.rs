@@ -34,8 +34,8 @@ const RX_STALE: Duration = Duration::from_secs(10);
 const PREEMPT_WINDOW: Duration = Duration::from_secs(3);
 /// No answer within this long ends an outgoing private call.
 const SETUP_TIMEOUT: Duration = Duration::from_secs(60);
-const LOG_CAP: usize = 100;
-const SDS_CAP: usize = 100;
+const LOG_CAP: usize = 1000;
+const SDS_CAP: usize = 1000;
 
 #[derive(Debug)]
 pub enum Event {

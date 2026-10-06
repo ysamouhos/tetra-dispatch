@@ -22,6 +22,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-appl
 header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}
 header h1{font-size:17px;margin:0;font-weight:650}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);font-size:13px;color:var(--muted)}
+a.pill{text-decoration:none;color:var(--fg)}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}
 .on .dot{background:var(--ok)} .off .dot{background:var(--bad)}
 .grow{flex:1}
@@ -72,6 +73,7 @@ th{color:var(--muted);font-weight:500}
   <span id="link" class="pill off"><span class="dot"></span><span id="link-text"></span></span>
   <span class="pill"><span data-t="issi"></span>&nbsp;<b id="issi">—</b></span>
   <span class="grow"></span>
+  <a href="/log" target="_blank" class="pill" data-t="logs"></a>
   <span id="opinfo" class="muted"></span>
   <button id="claim" class="primary" data-t="claim"></button>
   <button id="release" class="hidden" data-t="release"></button>
@@ -154,7 +156,7 @@ const LANGS={
     insecure:'The microphone needs https:// or localhost. Open the console through a TLS proxy.',
     group_rx:'Group call',group_tx:'Dispatcher transmitted',link_up:'Brew link up',link_down:'Brew link down',
     priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
-    delivered:'delivered',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
+    delivered:'delivered',logs:'Logs',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
     causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
       7:'incompatible',8:'service not supported',9:'pre-empted',10:'invalid identity',11:'SwMI disconnect',12:'no idle cc',
       13:'timeout',14:'SwMI disconnect'}},
@@ -170,7 +172,7 @@ const LANGS={
     insecure:'El micrófono necesita https:// o localhost. Abre la consola a través de un proxy TLS.',
     group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
     priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
-    delivered:'entregado',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
+    delivered:'entregado',logs:'Registros',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
     causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
       7:'incompatible',8:'servicio no soportado',9:'expulsado',10:'identidad no válida',11:'desconexión de red',12:'sin canal',
       13:'tiempo agotado',14:'desconexión de red'}},
@@ -203,7 +205,7 @@ function connect(){
     if(typeof ev.data!=='string'){playPcm(new Int16Array(ev.data));return}
     const m=JSON.parse(ev.data);
     if(m.type==='status'){const wasOp=st.you_operate;st=m;if(wasOp&&!m.you_operate)stopAudio();render()}
-    else if(m.type==='history'){logs=m.log||[];sdsMsgs=m.sds||[];positions={};(m.positions||[]).forEach(p=>positions[p.issi]=p);renderLog();renderSds();renderMap()}
+    else if(m.type==='history'){logs=(m.log||[]).slice(-100);sdsMsgs=(m.sds||[]).slice(-100);positions={};(m.positions||[]).forEach(p=>positions[p.issi]=p);renderLog();renderSds();renderMap()}
     else if(m.type==='position'){positions[m.pos.issi]=m.pos;renderMap()}
     else if(m.type==='log'){logs.push(m.entry);if(logs.length>100)logs.shift();renderLog()}
     else if(m.type==='sds'){sdsMsgs.push(m.msg);if(sdsMsgs.length>100)sdsMsgs.shift();renderSds()}

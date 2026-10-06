@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tetra Dispatch Logs</title>
+<style>
+:root{
+  --bg:#f4f5f7;--card:#fff;--fg:#1c2330;--muted:#677185;--line:#dde1e8;
+  --accent:#1f6feb;--ok:#1a7f37;--bad:#c62828;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){--bg:#0f1318;--card:#171c23;--fg:#e4e8ee;--muted:#8b95a7;--line:#2a313b;
+    --accent:#4c8dff;--ok:#3fb950;--bad:#f85149;}
+}
+:root[data-theme="dark"]{--bg:#0f1318;--card:#171c23;--fg:#e4e8ee;--muted:#8b95a7;--line:#2a313b;
+  --accent:#4c8dff;--ok:#3fb950;--bad:#f85149;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}
+header h1{font-size:17px;margin:0;font-weight:650}
+header a{color:var(--accent);text-decoration:none}
+.grow{flex:1}
+main{padding:14px 16px;max-width:1200px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+button{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+button.sel{background:var(--accent);border-color:var(--accent);color:#fff}
+input,select{font:inherit;padding:7px 9px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg);min-width:0}
+.muted{color:var(--muted)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--bad)}
+.dot.on{background:var(--ok)}
+.wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+td,th{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;font-size:14px;vertical-align:top}
+th{color:var(--muted);font-weight:500;position:sticky;top:0;background:var(--card)}
+td.ts{white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--muted)}
+td.num{font-variant-numeric:tabular-nums}
+td.text{white-space:pre-wrap;word-break:break-word}
+.empty{padding:20px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1 data-t="title"></h1>
+  <span class="dot" id="live"></span>
+  <span class="grow"></span>
+  <a href="/" data-t="back"></a>
+  <select id="lang" aria-label="Language"><option value="es">ES</option><option value="en">EN</option></select>
+  <button id="theme" title="Theme">◐</button>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <button id="tab-log" data-t="activity"></button>
+      <button id="tab-sds">SDS</button>
+      <span class="grow"></span>
+      <input id="q" type="search" data-tp="search" style="width:220px">
+      <button id="csv">CSV</button>
+    </div>
+    <div class="muted" id="count" style="margin-bottom:8px;font-size:13px"></div>
+    <div class="wrap"><table><thead id="head"></thead><tbody id="body"></tbody></table></div>
+  </div>
+</main>
+<script>
+'use strict';
+const LANGS={
+  en:{title:'Logs',back:'← Console',activity:'Activity',search:'Search…',time:'Time',event:'Event',details:'Details',
+    from:'From',to:'To',text:'Message',status:'Status',delivered:'delivered',sent:'sent',received:'received',
+    shown:'{n} of {t} entries (kept in memory, lost on restart)',empty:'No entries',
+    group_rx:'Group call',group_tx:'Dispatcher transmitted',link_up:'Brew link up',link_down:'Brew link down',
+    priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
+    causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
+      7:'incompatible',8:'service not supported',9:'pre-empted',10:'invalid identity',11:'SwMI disconnect',12:'no idle cc',
+      13:'timeout',14:'SwMI disconnect'}},
+  es:{title:'Registros',back:'← Consola',activity:'Actividad',search:'Buscar…',time:'Hora',event:'Evento',details:'Detalles',
+    from:'De',to:'A',text:'Mensaje',status:'Estado',delivered:'entregado',sent:'enviado',received:'recibido',
+    shown:'{n} de {t} entradas (en memoria, se pierden al reiniciar)',empty:'Sin entradas',
+    group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
+    priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
+    causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
+      7:'incompatible',8:'servicio no soportado',9:'expulsado',10:'identidad no válida',11:'desconexión de red',12:'sin canal',
+      13:'tiempo agotado',14:'desconexión de red'}},
+};
+let lang=(()=>{try{return localStorage.getItem('td_lang')}catch(_){return null}})()||((navigator.language||'es').slice(0,2)==='es'?'es':'en');
+const t=k=>(LANGS[lang]&&LANGS[lang][k])||LANGS.en[k]||k;
+const $=id=>document.getElementById(id);
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function setTheme(th){if(th)document.documentElement.dataset.theme=th;else delete document.documentElement.dataset.theme}
+try{setTheme(localStorage.getItem('td_theme'))}catch(_){}
+$('theme').onclick=()=>{const cur=document.documentElement.dataset.theme||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+  const nx=cur==='dark'?'light':'dark';setTheme(nx);try{localStorage.setItem('td_theme',nx)}catch(_){}};
+$('lang').onchange=e=>{lang=e.target.value;try{localStorage.setItem('td_lang',lang)}catch(_){}applyLang()};
+
+let tab=(()=>{try{return localStorage.getItem('td_log_tab')}catch(_){return null}})()||'log';
+let logs=[],sds=[];
+const CAP=1000;
+
+// ── Rows ─────────────────────────────────────────────────────────────
+function stamp(ms){const d=new Date(ms);return d.toLocaleDateString()+' '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
+function fmtSecs(s){s=Math.max(0,s|0);return String(s/60|0).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
+function causeText(c){return (LANGS[lang].causes||LANGS.en.causes)[c]||String(c)}
+function logRow(e){
+  let ev=e.kind,det='';
+  if(e.kind==='group_rx'){ev=t('group_rx');det=`TG ${e.gssi} · ISSI ${e.source}`}
+  else if(e.kind==='group_tx'){ev=t('group_tx');det=`TG ${e.gssi}`}
+  else if(e.kind==='link'){ev=e.up?t('link_up'):t('link_down');det=e.reason||''}
+  else if(e.kind==='private'){ev=t('priv_'+e.event);det=`${e.dir==='in'?'←':'→'} ${e.peer}`;
+    if(e.secs!=null)det+=` · ${fmtSecs(e.secs)}`;if(e.event!=='connected'&&e.cause!=null)det+=` · ${causeText(e.cause)}`}
+  return [stamp(e.ts),ev,det];
+}
+function sdsRow(m){
+  const status=m.dir==='in'?t('received'):m.delivered?t('delivered'):t('sent');
+  return [stamp(m.ts),m.dir==='in'?m.from:'',m.to,m.text,status];
+}
+function rows(){
+  const src=tab==='log'?logs:sds,fn=tab==='log'?logRow:sdsRow,q=$('q').value.trim().toLowerCase();
+  const all=src.slice().reverse().map(fn);
+  return {all,shown:q?all.filter(r=>r.some(c=>String(c).toLowerCase().includes(q))):all};
+}
+function cols(){return tab==='log'?[t('time'),t('event'),t('details')]:[t('time'),t('from'),t('to'),t('text'),t('status')]}
+
+// ── Rendering ────────────────────────────────────────────────────────
+function render(){
+  $('tab-log').classList.toggle('sel',tab==='log');$('tab-sds').classList.toggle('sel',tab==='sds');
+  $('head').innerHTML='<tr>'+cols().map(c=>`<th>${esc(c)}</th>`).join('')+'</tr>';
+  const {all,shown}=rows(),textCol=tab==='sds'?3:-1;
+  $('body').innerHTML=shown.length?shown.map(r=>'<tr>'+r.map((c,i)=>
+    `<td class="${i===0?'ts':i===textCol?'text':''}">${esc(c)}</td>`).join('')+'</tr>').join('')
+    :`<tr><td class="empty" colspan="${cols().length}">${t('empty')}</td></tr>`;
+  $('count').textContent=t('shown').replace('{n}',shown.length).replace('{t}',all.length);
+}
+function applyLang(){
+  document.documentElement.lang=lang;$('lang').value=lang;
+  document.querySelectorAll('[data-t]').forEach(e=>e.textContent=t(e.dataset.t));
+  document.querySelectorAll('[data-tp]').forEach(e=>e.placeholder=t(e.dataset.tp));
+  render();
+}
+function setTab(x){tab=x;try{localStorage.setItem('td_log_tab',x)}catch(_){}render()}
+$('tab-log').onclick=()=>setTab('log');$('tab-sds').onclick=()=>setTab('sds');
+$('q').oninput=render;
+
+// ── CSV export ───────────────────────────────────────────────────────
+$('csv').onclick=()=>{
+  const q=v=>/[",\n;]/.test(v=String(v))?'"'+v.replace(/"/g,'""')+'"':v;
+  const csv=[cols(),...rows().shown].map(r=>r.map(q).join(',')).join('\r\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}));
+  a.download=`tetra-${tab==='log'?'activity':'sds'}-${new Date().toISOString().slice(0,19).replace(/[T:]/g,'-')}.csv`;
+  a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+};
+
+// ── WebSocket (watch only) ───────────────────────────────────────────
+function connect(){
+  const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
+  ws.binaryType='arraybuffer';
+  ws.onopen=()=>$('live').classList.add('on');
+  ws.onclose=()=>{$('live').classList.remove('on');setTimeout(connect,2000)};
+  ws.onmessage=ev=>{
+    if(typeof ev.data!=='string')return;
+    const m=JSON.parse(ev.data);
+    if(m.type==='history'){logs=m.log||[];sds=m.sds||[];render()}
+    else if(m.type==='log'){logs.push(m.entry);if(logs.length>CAP)logs.shift();if(tab==='log')render()}
+    else if(m.type==='sds'){
+      // A delivery report re-sends the message: replace it in place.
+      const i=m.msg.uuid?sds.findIndex(x=>x.uuid===m.msg.uuid):-1;
+      if(i>=0)sds[i]=m.msg;else{sds.push(m.msg);if(sds.length>CAP)sds.shift()}
+      if(tab==='sds')render()}
+  };
+}
+applyLang();
+connect();
+</script>
+</body>
+</html>

@@ -23,6 +23,7 @@ use crate::config::WebConfig;
 use crate::dispatcher::{ClientId, Event, UiCmd, UiOut};
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
+const LOG_HTML: &str = include_str!("../static/log.html");
 /// Longest microphone chunk accepted in one message (1 s).
 const MAX_PCM_SAMPLES: usize = 8_000;
 
@@ -38,6 +39,7 @@ pub async fn run(cfg: WebConfig, events: mpsc::Sender<Event>, ui: broadcast::Sen
     let state = AppState { events, ui, password: Arc::new(cfg.password.clone()), next_id: Arc::new(AtomicU64::new(1)) };
     let app = Router::new()
         .route("/", get(index))
+        .route("/log", get(log_page))
         .route("/ws", get(ws_upgrade))
         .route("/healthz", get(|| async { "ok\n" }))
         .with_state(state);
@@ -91,6 +93,13 @@ async fn index(State(state): State<AppState>, headers: HeaderMap) -> Response {
         return challenge();
     }
     ([(header::CACHE_CONTROL, "no-store")], Html(INDEX_HTML)).into_response()
+}
+
+async fn log_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !authorized(&state, &headers) {
+        return challenge();
+    }
+    ([(header::CACHE_CONTROL, "no-store")], Html(LOG_HTML)).into_response()
 }
 
 async fn ws_upgrade(
