@@ -193,6 +193,7 @@ fn parse_command(text: &str) -> Option<UiCmd> {
             period_s: v.get("period_s").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(0),
         },
         "locate_stop" => UiCmd::LocationStop { issi: ssi(&v, "issi") },
+        "block" => UiCmd::Block { issi: ssi(&v, "issi"), block: v.get("block").and_then(Value::as_bool).unwrap_or(true) },
         _ => return None,
     })
 }
@@ -209,6 +210,7 @@ mod tests {
             Some(UiCmd::SetGroups { ref listen, tx: 92 }) if listen == &vec![91, 92]
         ));
         assert!(matches!(parse_command(r#"{"type":"sds","to":2001,"text":"hi"}"#), Some(UiCmd::Sds { dest: 2001, .. })));
+        assert!(matches!(parse_command(r#"{"type":"block","issi":4013,"block":false}"#), Some(UiCmd::Block { issi: 4013, block: false })));
         assert!(parse_command(r#"{"type":"nope"}"#).is_none());
         assert!(parse_command("not json").is_none());
     }

@@ -142,6 +142,17 @@ th{color:var(--muted);font-weight:500}
     <div class="row muted" id="polls" style="margin-top:6px"></div>
   </section>
 
+  <section class="card">
+    <h2 data-t="blocked"></h2>
+    <div class="row muted" data-t="block_hint"></div>
+    <div class="row">
+      <input id="blk-issi" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI" style="width:100px">
+      <button id="blk-add" class="danger" data-t="block"></button>
+    </div>
+    <div class="row muted" id="blk-state" style="margin-top:6px"></div>
+    <div id="blk-list" style="margin-top:6px"></div>
+  </section>
+
   <section class="card span2">
     <h2 data-t="map"></h2>
     <div id="map"></div>
@@ -199,7 +210,7 @@ const LANGS={
     insecure:'The microphone needs https:// or localhost. Open the console through a TLS proxy.',
     group_rx:'Group call',no_position:'no position',emergency:'EMERGENCY ACTIVE',emerg_call:'emergency call',group_tx:'Dispatcher transmitted',loc_req_once:'Location requested',loc_req_poll:'Location polling started',loc_req_stop:'Location polling stopped',link_up:'Brew link up',link_down:'Brew link down',
     priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
-    delivered:'delivered',logs:'Logs',ambience:'Ambient listen',amb_hint:'Open a listening call to the radio. The radio shows the call — this is not covert. The brew-server only relays the call, so it works only if the radio/basestation supports ambience listening.',ambience_call:'Ambient Listen Call',locate:'Locate',loc_once:'Locate once',loc_every:'every',seconds:'s',loc_poll:'Start polling',loc_stop:'Stop',polling:'Polling: ',listen_only:'Listening (radio talks)',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
+    delivered:'delivered',blocked:'Blocked ISSIs',block:'Block',unblock:'Unblock',block_none:'No ISSI is blocked',block_na:'This console may not edit the blacklist on this brew-server',block_hint:'A blocked radio cannot call, send SDS or transmit through the brew-server. Emergency calls, ambient listen and location requests still work.',block_log:'Blocked',unblock_log:'Unblocked',logs:'Logs',ambience:'Ambient listen',amb_hint:'Open a listening call to the radio. The radio shows the call — this is not covert. The brew-server only relays the call, so it works only if the radio/basestation supports ambience listening.',ambience_call:'Ambient Listen Call',locate:'Locate',loc_once:'Locate once',loc_every:'every',seconds:'s',loc_poll:'Start polling',loc_stop:'Stop',polling:'Polling: ',listen_only:'Listening (radio talks)',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
     al_auth_title:'Authorize ambient listen',al_auth_msg:'Ambient listen needs authorization. Enter the password to open a listening call.',al_auth_label:'Authorization password',cancel:'Cancel',al_denied:'Ambient-listen authorization failed',
     amb_log:'Ambient listen',amb_started:'started',amb_denied:'authorization denied',
     causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
@@ -217,7 +228,7 @@ const LANGS={
     insecure:'El micrófono necesita https:// o localhost. Abre la consola a través de un proxy TLS.',
     group_rx:'Llamada de grupo',no_position:'sin posición',emergency:'EMERGENCIA ACTIVA',emerg_call:'llamada de emergencia',group_tx:'Transmitió el despacho',loc_req_once:'Localización solicitada',loc_req_poll:'Sondeo de localización iniciado',loc_req_stop:'Sondeo de localización detenido',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
     priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
-    delivered:'entregado',logs:'Registros',ambience:'Escucha ambiente',amb_hint:'Abre una llamada de escucha a la radio. La radio muestra la llamada — no es encubierto. El brew-server solo reenvía la llamada, así que funciona solo si la radio/estación base admite escucha ambiente.',ambience_call:'Llamada de escucha ambiente',locate:'Localización',loc_once:'Localizar',loc_every:'cada',seconds:'s',loc_poll:'Sondear',loc_stop:'Parar',polling:'Sondeando: ',listen_only:'Escuchando (habla la radio)',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
+    delivered:'entregado',blocked:'ISSI bloqueados',block:'Bloquear',unblock:'Desbloquear',block_none:'Ningún ISSI bloqueado',block_na:'Esta consola no puede editar la lista negra de este brew-server',block_hint:'Una radio bloqueada no puede llamar, enviar SDS ni transmitir por el brew-server. Las llamadas de emergencia, la escucha ambiente y las peticiones de localización siguen funcionando.',block_log:'Bloqueado',unblock_log:'Desbloqueado',logs:'Registros',ambience:'Escucha ambiente',amb_hint:'Abre una llamada de escucha a la radio. La radio muestra la llamada — no es encubierto. El brew-server solo reenvía la llamada, así que funciona solo si la radio/estación base admite escucha ambiente.',ambience_call:'Llamada de escucha ambiente',locate:'Localización',loc_once:'Localizar',loc_every:'cada',seconds:'s',loc_poll:'Sondear',loc_stop:'Parar',polling:'Sondeando: ',listen_only:'Escuchando (habla la radio)',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
     al_auth_title:'Autorizar escucha ambiente',al_auth_msg:'La escucha ambiente requiere autorización. Introduce la contraseña para abrir la llamada de escucha.',al_auth_label:'Contraseña de autorización',cancel:'Cancelar',al_denied:'Autorización de escucha ambiente fallida',
     amb_log:'Escucha ambiente',amb_started:'iniciada',amb_denied:'autorización denegada',
     causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
@@ -359,8 +370,11 @@ $('al-modal').addEventListener('click',e=>{if(e.target===$('al-modal'))closeAlMo
 function locate(n,period){if(!(n>0))return;send({type:'locate',issi:n,period_s:period})}
 $('loc-once').onclick=()=>locate(parseInt($('loc-issi').value,10),0);
 $('loc-poll').onclick=()=>locate(parseInt($('loc-issi').value,10),Math.max(5,parseInt($('loc-period').value,10)||30));
+function blockIssi(n,block){if(n>0)send({type:'block',issi:n,block:block})}
+$('blk-add').onclick=()=>{blockIssi(parseInt($('blk-issi').value,10),true);$('blk-issi').value=''};
+$('blk-list').addEventListener('click',e=>{const i=parseInt(e.target.dataset.unblock,10);if(i)blockIssi(i,false)});
 $('polls').addEventListener('click',e=>{const i=parseInt(e.target.dataset.stop,10);if(i)send({type:'locate_stop',issi:i})});
-$('map').addEventListener('click',e=>{const b=e.target.closest('[data-loc]');if(b)locate(parseInt(b.dataset.loc,10),0)});
+$('map').addEventListener('click',e=>{const b=e.target.closest('[data-loc]');if(b)locate(parseInt(b.dataset.loc,10),0);const k=e.target.closest('[data-block]');if(k)blockIssi(parseInt(k.dataset.block,10),true)});
 $('answer').onclick=()=>send({type:'answer'});$('hangup').onclick=()=>send({type:'hangup'});
 
 // ── SDS ──────────────────────────────────────────────────────────────
@@ -410,7 +424,8 @@ function renderMap(){
     m.unbindTooltip().bindTooltip(tip,{permanent:loud,direction:'top',offset:[0,loud?-24:-18],className:emg?'emg':tg!=null?'talk':''});
     m.unbindPopup().bindPopup((emg?`<b style="color:#c62828">🚨 ${t('emergency')}</b><br>`:'')+`<b>ISSI ${esc(issi)}</b>${tg!=null?'<br>TG '+esc(tg):''}<br>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`+
       (p.speed!=null?`<br>${Math.round(p.speed)} km/h`+(p.heading!=null?` · ${Math.round(p.heading)}°`:''):'')+`<br>${hhmm(p.ts)}`+
-      `<br><button data-loc="${esc(issi)}" style="margin-top:6px">${t('loc_once')}</button>`);
+      `<br><button data-loc="${esc(issi)}" style="margin-top:6px">${t('loc_once')}</button>`+
+      (st.can_block&&!(st.blacklist||[]).includes(Number(issi))?` <button data-block="${esc(issi)}" class="danger" style="margin-top:6px">${t('block')}</button>`:''));
   }
   const pts=Object.values(positions);
   if(!fitted&&pts.length){fitted=true;map.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lon])).pad(.2),{maxZoom:15})}
@@ -422,7 +437,8 @@ function fmtSecs(s){s=Math.max(0,s|0);return String(s/60|0).padStart(2,'0')+':'+
 function renderLog(){
   $('log').innerHTML=logs.slice().reverse().map(e=>{
     let txt='';
-    if(e.kind==='emergency')txt=`🚨 ${t('emergency')} · ISSI ${esc(e.issi)}${e.gssi!=null?' → '+esc(e.gssi):''}`;
+    if(e.kind==='block')txt=`${e.block?t('block_log'):t('unblock_log')} ISSI ${esc(e.issi)}`;
+    else if(e.kind==='emergency')txt=`🚨 ${t('emergency')} · ISSI ${esc(e.issi)}${e.gssi!=null?' → '+esc(e.gssi):''}`;
     else if(e.kind==='group_rx')txt=`${e.emergency?'🚨 ':''}${t('group_rx')} ${esc(e.gssi)} · ${esc(e.source)}${e.emergency?' · '+t('emerg_call'):''}`;
     else if(e.kind==='group_tx')txt=`${t('group_tx')} · ${esc(e.gssi)}`;
     else if(e.kind==='link')txt=e.up?t('link_up'):t('link_down')+(e.reason?' · '+esc(e.reason):'');
@@ -443,6 +459,11 @@ function render(){
   $('claim').disabled=!wsUp;
   $('opinfo').textContent=t('operator')+(op?t('you'):(st.operator||t('none')));
   document.querySelectorAll('#ptt,#call-duplex,#call-simplex,#call-ambience,#tg-add,#sds-send,#txsel,#loc-once,#loc-poll').forEach(b=>b.disabled=!op);
+  // Blacklist on the connected brew-server: editable by the operator when brew-server allows this console.
+  const canBlock=op&&!!st.can_block,bl=st.blacklist||[];
+  $('blk-add').disabled=!canBlock;$('blk-issi').disabled=!canBlock;
+  $('blk-state').textContent=st.can_block?'':t('block_na');
+  $('blk-list').innerHTML=bl.length?bl.map(i=>`<span class="pill" style="margin:2px">${esc(i)} <button data-unblock="${esc(i)}" ${canBlock?'':'disabled'}>${t('unblock')}</button></span>`).join(''):`<span class="muted">${t('block_none')}</span>`;
 
   // Talkgroups
   const groups=knownGroups(),listen=new Set(st.listen||[]);

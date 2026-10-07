@@ -75,6 +75,8 @@ pub enum UiCmd {
     LocationRequest { issi: u32, period_s: u32 },
     /// Stop polling a radio's position.
     LocationStop { issi: u32 },
+    /// Block (or unblock) an ISSI on the connected brew-server's blacklist.
+    Block { issi: u32, block: bool },
 }
 
 #[derive(Debug, Clone)]
@@ -194,12 +196,17 @@ pub struct Dispatcher {
     /// (link trouble) expires after `ALARMS_STALE`.
     alarms: BTreeMap<u32, Option<u32>>,
     alarms_at: Option<Instant>,
+    /// brew-server's ISSI blacklist as last pushed, and whether this console may edit it.
+    blacklist: BTreeSet<u32>,
+    can_block: bool,
 }
 
 /// How long a list from brew-server stays valid without a refresh.
 const ALARMS_STALE: Duration = Duration::from_secs(15);
 /// `CLASS_SERVICE` type brew-server pushes: the active emergencies.
 const SERVICE_EMERGENCY: u8 = 0x11;
+/// `CLASS_SERVICE` type brew-server pushes: the ISSI blacklist (or a refused edit).
+const SERVICE_BLACKLIST: u8 = 0x13;
 
 fn epoch_ms() -> u64 {
     std::time::SystemTime::now()
@@ -249,6 +256,8 @@ impl Dispatcher {
             sds_pending: HashMap::new(),
             alarms: BTreeMap::new(),
             alarms_at: None,
+            blacklist: BTreeSet::new(),
+            can_block: false,
         }
     }
 
@@ -362,6 +371,7 @@ impl Dispatcher {
             }
             BrewMessage::Subscriber(s) => debug!("brew: subscriber msg type={} issi={}", s.msg_type, s.number),
             BrewMessage::Service(s) if s.service_type == SERVICE_EMERGENCY => self.on_emergencies(&s.json_data),
+            BrewMessage::Service(s) if s.service_type == SERVICE_BLACKLIST => self.on_blacklist(&s.json_data),
             BrewMessage::Service(s) => debug!("brew: service type={} {}", s.service_type, s.json_data),
         }
     }
@@ -387,6 +397,49 @@ impl Dispatcher {
         if changed || was_active != !self.alarms.is_empty() {
             self.push_status();
         }
+    }
+
+    /// brew-server's blacklist: `{"blacklist":[N,...],"can_edit":bool}`, or
+    /// `{"error":"..."}` when it refused an edit.
+    fn on_blacklist(&mut self, json: &str) {
+        let Ok(v) = serde_json::from_str::<Value>(json) else {
+            debug!("brew: malformed blacklist message");
+            return;
+        };
+        if let Some(e) = v["error"].as_str() {
+            warn!("brew-server refused a blacklist edit: {e}");
+            self.last_error = Some(format!("brew-server: {e}"));
+            self.push_status();
+            return;
+        }
+        let list: BTreeSet<u32> = v["blacklist"].as_array().into_iter().flatten()
+            .filter_map(|i| i.as_u64().and_then(|i| u32::try_from(i).ok())).collect();
+        let can = v["can_edit"].as_bool().unwrap_or(false);
+        if list != self.blacklist || can != self.can_block {
+            self.blacklist = list;
+            self.can_block = can;
+            self.push_status();
+        }
+    }
+
+    /// Ask brew-server to block or unblock an ISSI. It decides whether this
+    /// console may (`[blacklist] console_users`) and answers with the new list.
+    fn block_issi(&mut self, issi: u32, block: bool) {
+        if !valid_ssi(issi) {
+            self.last_error = Some("invalid ISSI".into());
+            return;
+        }
+        if self.link.is_none() {
+            self.last_error = Some("not connected to brew-server".into());
+            return;
+        }
+        if !self.can_block {
+            self.last_error = Some("this console may not edit the blacklist on this brew-server".into());
+            return;
+        }
+        let json = json!({"action": if block { "block" } else { "unblock" }, "issi": issi}).to_string();
+        self.send(build_service(BREW_SERVICE_BLACKLIST_CMD, &json));
+        self.note("block", json!({"issi": issi, "block": block}));
     }
 
     fn on_call_control(&mut self, cc: BrewCallControlMessage) {
@@ -772,6 +825,7 @@ impl Dispatcher {
             UiCmd::Hangup => self.hangup(),
             UiCmd::Sds { dest, text } => self.send_text(dest, text),
             UiCmd::AmbienceListen { issi, password } => self.ambience_listen(id, issi, &password),
+            UiCmd::Block { issi, block } => self.block_issi(issi, block),
             UiCmd::LocationRequest { issi, period_s } => self.request_location(issi, period_s),
             UiCmd::LocationStop { issi } => {
                 self.polls.remove(&issi);
@@ -1011,6 +1065,8 @@ impl Dispatcher {
             "rx": rx,
             "active": active,
             "emergencies": emergencies,
+            "blacklist": self.blacklist,
+            "can_block": self.can_block,
             "private": private,
             "polls": self.polls.iter().map(|(&i, (p, _))| json!({"issi": i, "period_s": p.as_secs()})).collect::<Vec<_>>(),
             "operator": self.owner.and_then(|id| self.clients.get(&id)),
@@ -1135,6 +1191,45 @@ mod tests {
         assert_eq!(d.status()["rx"]["gssi"], 91);
         d.handle(Event::Brew(build_group_idle(&em2, 0)));
         assert!(d.status()["active"].as_array().unwrap().iter().all(|a| a["emergency"] == false));
+    }
+
+    fn service(t: u8, json: &str) -> Vec<u8> {
+        let mut m = vec![0xf4, t];
+        m.extend_from_slice(json.as_bytes());
+        m.push(0);
+        m
+    }
+
+    fn raw(rx: &mut mpsc::Receiver<Vec<u8>>) -> Vec<Vec<u8>> {
+        std::iter::from_fn(|| rx.try_recv().ok()).collect()
+    }
+
+    #[test]
+    fn the_operator_can_block_an_issi_when_brew_server_allows_it() {
+        let (mut d, _ui, mut rx) = setup();
+        d.handle(Event::Brew(service(0x13, r#"{"blacklist":[7],"can_edit":false}"#)));
+        assert_eq!(d.status()["blacklist"], json!([7]));
+        assert_eq!(d.status()["can_block"], false);
+        // Not allowed here: nothing is sent, the operator is told.
+        d.handle(Event::Ui(1, UiCmd::Block { issi: 4013, block: true }));
+        assert!(raw(&mut rx).iter().all(|m| m.get(..2) != Some(&[0xf4, 0x12][..])));
+        assert!(d.status()["last_error"].as_str().unwrap().contains("may not edit"));
+
+        d.handle(Event::Brew(service(0x13, r#"{"blacklist":[7],"can_edit":true}"#)));
+        assert_eq!(d.status()["can_block"], true);
+        d.handle(Event::Ui(1, UiCmd::Block { issi: 4013, block: true }));
+        let sent: Vec<Vec<u8>> = raw(&mut rx).into_iter().filter(|m| m.get(..2) == Some(&[0xf4, 0x12][..])).collect();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(&sent[0][2..sent[0].len() - 1], br#"{"action":"block","issi":4013}"#);
+        d.handle(Event::Ui(1, UiCmd::Block { issi: 4013, block: false }));
+        let sent: Vec<Vec<u8>> = raw(&mut rx).into_iter().filter(|m| m.get(..2) == Some(&[0xf4, 0x12][..])).collect();
+        assert_eq!(&sent[0][2..sent[0].len() - 1], br#"{"action":"unblock","issi":4013}"#);
+        // brew-server's refusal is shown.
+        d.handle(Event::Brew(service(0x13, r#"{"error":"not authorised to edit the blacklist"}"#)));
+        assert!(d.status()["last_error"].as_str().unwrap().contains("not authorised"));
+        // Only the operator can send it.
+        d.handle(Event::Ui(2, UiCmd::Block { issi: 5, block: true }));
+        assert!(raw(&mut rx).iter().all(|m| m.get(..2) != Some(&[0xf4, 0x12][..])));
     }
 
     #[test]
