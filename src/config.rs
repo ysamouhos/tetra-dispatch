@@ -59,6 +59,11 @@ pub struct DispatchConfig {
     /// Brew priority of the dispatcher's group transmissions.
     #[serde(default)]
     pub priority: u8,
+    /// Password that authorizes ambience-listening (AL) calls. Empty = no
+    /// authorization required. When set, the console must supply it before an
+    /// AL call starts, and every attempt is recorded in the activity log.
+    #[serde(default)]
+    pub ambience_password: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -89,7 +94,7 @@ fn default_listen() -> String { "0.0.0.0:8443".into() }
 
 impl Default for DispatchConfig {
     fn default() -> Self {
-        Self { operator_issi: default_operator_issi(), groups: Vec::new(), tx_group: 0, priority: 0 }
+        Self { operator_issi: default_operator_issi(), groups: Vec::new(), tx_group: 0, priority: 0, ambience_password: String::new() }
     }
 }
 
