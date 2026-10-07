@@ -92,7 +92,13 @@ struct RxCall {
     source: u32,
     started: Instant,
     last: Instant,
+    /// Emergency call (priority 15). brew-server pushes these to every console,
+    /// whatever groups it listens to.
+    emergency: bool,
 }
+
+/// Call priority of an emergency call (ETSI EN 300 392-2 clause 14.8).
+const EMERGENCY_PRIORITY: u8 = 15;
 
 struct TxCall {
     uuid: Uuid,
@@ -416,21 +422,28 @@ impl Dispatcher {
         if self.tx.as_ref().is_some_and(|t| t.uuid == uuid) {
             return;
         }
-        if !self.affiliated.contains(&gt.destination) {
-            // brew-server may broadcast unaffiliated groups (fallback routing).
+        let emergency = gt.priority >= EMERGENCY_PRIORITY;
+        if !self.affiliated.contains(&gt.destination) && !emergency {
+            // brew-server may broadcast unaffiliated groups (fallback routing). An emergency
+            // call is always taken: brew-server pushes it to every console.
             return;
         }
         let now = Instant::now();
         let fresh = !self.rx.contains_key(&uuid);
-        let call = self.rx.entry(uuid).or_insert(RxCall { gssi: gt.destination, source: gt.source, started: now, last: now });
+        let call = self.rx.entry(uuid).or_insert(RxCall { gssi: gt.destination, source: gt.source, started: now, last: now, emergency });
+        call.emergency |= emergency;
         // A GROUP_TX on a running call is a talker change.
         let talker_changed = call.source != gt.source;
         call.source = gt.source;
         call.last = now;
         if fresh || talker_changed {
-            self.note("group_rx", json!({"gssi": gt.destination, "source": gt.source}));
+            self.note("group_rx", json!({"gssi": gt.destination, "source": gt.source, "emergency": emergency}));
         }
-        if self.playing.is_none() && self.private.is_none() {
+        // An emergency call takes the speaker over from an ordinary group call (not from a
+        // private call in progress, nor from another emergency call already playing).
+        let playing_emergency = self.playing.and_then(|u| self.rx.get(&u)).is_some_and(|c| c.emergency);
+        let takes_over = emergency && self.private.is_none() && !playing_emergency && self.playing != Some(uuid);
+        if (self.playing.is_none() && self.private.is_none()) || takes_over {
             self.playing = Some(uuid);
             self.codec.reset();
         }
@@ -923,7 +936,7 @@ impl Dispatcher {
 
     fn status(&self) -> Value {
         let rx = self.playing.and_then(|u| self.rx.get(&u)).map(|c| json!({"gssi": c.gssi, "source": c.source}));
-        let active: Vec<Value> = self.rx.values().map(|c| json!({"gssi": c.gssi, "source": c.source})).collect();
+        let active: Vec<Value> = self.rx.values().map(|c| json!({"gssi": c.gssi, "source": c.source, "emergency": c.emergency})).collect();
         let private = if let Some(p) = &self.private {
             json!({
                 "peer": p.peer, "duplex": p.duplex, "inbound": p.inbound, "phase": p.phase.name(),
@@ -1046,6 +1059,33 @@ mod tests {
         assert!(call_states(&drain(&mut rx)).is_empty());
         d.handle(Event::Ui(1, UiCmd::Ptt { down: true }));
         assert_eq!(call_states(&drain(&mut rx)), vec![CALL_STATE_GROUP_TX]);
+    }
+
+    #[test]
+    fn emergency_group_call_is_taken_even_when_not_listened_to_and_takes_the_speaker() {
+        let (mut d, mut ui, _rx) = setup();
+        // Group 99 is not listened to: an ordinary call there is ignored ...
+        let normal = Uuid::new_v4();
+        d.handle(Event::Brew(build_group_tx(&normal, 1234, 99, 0, 0, None)));
+        assert!(d.status()["active"].as_array().unwrap().is_empty());
+        // ... but an emergency call there is taken, flagged, and played.
+        let em = Uuid::new_v4();
+        d.handle(Event::Brew(build_group_tx(&em, 4013, 99, EMERGENCY_PRIORITY, 0, None)));
+        let st = d.status();
+        assert_eq!(st["active"][0]["emergency"], true);
+        assert_eq!(st["rx"]["gssi"], 99);
+        d.handle(Event::Brew(build_voice_frame(&em, 288, &[0u8; 36])));
+        assert!(std::iter::from_fn(|| ui.try_recv().ok()).any(|m| matches!(m, UiOut::Pcm(1, _))));
+        // It takes the speaker over from an ordinary call already playing.
+        d.handle(Event::Brew(build_group_idle(&em, 0)));
+        let ordinary = Uuid::new_v4();
+        d.handle(Event::Brew(build_group_tx(&ordinary, 1234, 92, 0, 0, None)));
+        assert_eq!(d.status()["rx"]["gssi"], 92);
+        let em2 = Uuid::new_v4();
+        d.handle(Event::Brew(build_group_tx(&em2, 4013, 91, EMERGENCY_PRIORITY, 0, None)));
+        assert_eq!(d.status()["rx"]["gssi"], 91);
+        d.handle(Event::Brew(build_group_idle(&em2, 0)));
+        assert!(d.status()["active"].as_array().unwrap().iter().all(|a| a["emergency"] == false));
     }
 
     #[test]

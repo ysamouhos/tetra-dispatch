@@ -18,6 +18,11 @@
 :root[data-theme="dark"]{--bg:#0f1318;--card:#171c23;--fg:#e4e8ee;--muted:#8b95a7;--line:#2a313b;
   --accent:#4c8dff;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--tx:#f85149;--rx:#3fb950;}
 *{box-sizing:border-box}
+#emergency{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#c62828;color:#fff;padding:10px 16px;font-weight:700;border-bottom:2px solid #ff8a80}
+#emergency.hidden{display:none}
+#emergency .edot{width:10px;height:10px;border-radius:50%;background:#fff;animation:ebreathe 1.6s ease-in-out infinite}
+#emergency .echip{background:rgba(255,255,255,.2);border-radius:4px;padding:2px 8px;font-weight:600;font-size:13px}
+@keyframes ebreathe{50%{opacity:.3}}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}
 header h1{font-size:17px;margin:0;font-weight:650}
@@ -75,6 +80,7 @@ th{color:var(--muted);font-weight:500}
 </style>
 </head>
 <body>
+<div id="emergency" class="hidden" role="alert"><span class="edot"></span><span data-t="emergency"></span><span id="emergency-list" style="display:flex;flex-wrap:wrap;gap:8px"></span></div>
 <header>
   <h1>Tetra Dispatch</h1>
   <span id="link" class="pill off"><span class="dot"></span><span id="link-text"></span></span>
@@ -189,7 +195,7 @@ const LANGS={
     answering:'Connecting…',connected_call:'Connected',ended:'Call ended',failed:'Call failed',duplex:'duplex',simplex:'simplex',
     remove:'Remove',active:'Active: ',preempt:'Busy — press again to transmit over it',mic_fail:'Microphone unavailable: ',
     insecure:'The microphone needs https:// or localhost. Open the console through a TLS proxy.',
-    group_rx:'Group call',group_tx:'Dispatcher transmitted',loc_req_once:'Location requested',loc_req_poll:'Location polling started',loc_req_stop:'Location polling stopped',link_up:'Brew link up',link_down:'Brew link down',
+    group_rx:'Group call',emergency:'EMERGENCY ACTIVE',emerg_call:'emergency call',group_tx:'Dispatcher transmitted',loc_req_once:'Location requested',loc_req_poll:'Location polling started',loc_req_stop:'Location polling stopped',link_up:'Brew link up',link_down:'Brew link down',
     priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
     delivered:'delivered',logs:'Logs',ambience:'Ambient listen',amb_hint:'Open a listening call to the radio. The radio shows the call — this is not covert. The brew-server only relays the call, so it works only if the radio/basestation supports ambience listening.',ambience_call:'Ambient Listen Call',locate:'Locate',loc_once:'Locate once',loc_every:'every',seconds:'s',loc_poll:'Start polling',loc_stop:'Stop',polling:'Polling: ',listen_only:'Listening (radio talks)',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
     al_auth_title:'Authorize ambient listen',al_auth_msg:'Ambient listen needs authorization. Enter the password to open a listening call.',al_auth_label:'Authorization password',cancel:'Cancel',al_denied:'Ambient-listen authorization failed',
@@ -207,7 +213,7 @@ const LANGS={
     answering:'Conectando…',connected_call:'Conectada',ended:'Llamada finalizada',failed:'Llamada fallida',duplex:'dúplex',simplex:'símplex',
     remove:'Quitar',active:'Activos: ',preempt:'Ocupado — pulsa otra vez para transmitir encima',mic_fail:'Micrófono no disponible: ',
     insecure:'El micrófono necesita https:// o localhost. Abre la consola a través de un proxy TLS.',
-    group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',loc_req_once:'Localización solicitada',loc_req_poll:'Sondeo de localización iniciado',loc_req_stop:'Sondeo de localización detenido',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
+    group_rx:'Llamada de grupo',emergency:'EMERGENCIA ACTIVA',emerg_call:'llamada de emergencia',group_tx:'Transmitió el despacho',loc_req_once:'Localización solicitada',loc_req_poll:'Sondeo de localización iniciado',loc_req_stop:'Sondeo de localización detenido',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
     priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
     delivered:'entregado',logs:'Registros',ambience:'Escucha ambiente',amb_hint:'Abre una llamada de escucha a la radio. La radio muestra la llamada — no es encubierto. El brew-server solo reenvía la llamada, así que funciona solo si la radio/estación base admite escucha ambiente.',ambience_call:'Llamada de escucha ambiente',locate:'Localización',loc_once:'Localizar',loc_every:'cada',seconds:'s',loc_poll:'Sondear',loc_stop:'Parar',polling:'Sondeando: ',listen_only:'Escuchando (habla la radio)',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
     al_auth_title:'Autorizar escucha ambiente',al_auth_msg:'La escucha ambiente requiere autorización. Introduce la contraseña para abrir la llamada de escucha.',al_auth_label:'Contraseña de autorización',cancel:'Cancelar',al_denied:'Autorización de escucha ambiente fallida',
@@ -410,7 +416,7 @@ function fmtSecs(s){s=Math.max(0,s|0);return String(s/60|0).padStart(2,'0')+':'+
 function renderLog(){
   $('log').innerHTML=logs.slice().reverse().map(e=>{
     let txt='';
-    if(e.kind==='group_rx')txt=`${t('group_rx')} ${esc(e.gssi)} · ${esc(e.source)}`;
+    if(e.kind==='group_rx')txt=`${e.emergency?'🚨 ':''}${t('group_rx')} ${esc(e.gssi)} · ${esc(e.source)}${e.emergency?' · '+t('emerg_call'):''}`;
     else if(e.kind==='group_tx')txt=`${t('group_tx')} · ${esc(e.gssi)}`;
     else if(e.kind==='link')txt=e.up?t('link_up'):t('link_down')+(e.reason?' · '+esc(e.reason):'');
     else if(e.kind==='location_req')txt=(e.period_s?t('loc_req_poll')+` · ${e.period_s}s`:t('loc_req_once'))+` · ${esc(e.issi)}`;
@@ -438,6 +444,9 @@ function render(){
     <td><input type="radio" name="tx" data-g="${g}" ${g===st.tx_group?'checked':''} ${op?'':'disabled'}></td>
     <td><button data-rm="${g}" ${op?'':'disabled'}>${t('remove')}</button></td></tr>`).join('');
   $('txsel').innerHTML='<option value="0">—</option>'+groups.map(g=>`<option value="${g}" ${g===st.tx_group?'selected':''}>${g}</option>`).join('');
+  const emg=(st.active||[]).filter(a=>a.emergency);
+  $('emergency').classList.toggle('hidden',!emg.length);
+  $('emergency-list').innerHTML=emg.map(a=>`<span class="echip">ISSI ${esc(a.source)} → ${esc(a.gssi)} · ${t('emerg_call')}</span>`).join('');
   $('active').textContent=(st.active&&st.active.length)?t('active')+st.active.map(a=>a.gssi+' ('+a.source+')').join(', '):'';
 
   // PTT / RX

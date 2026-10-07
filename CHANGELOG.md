@@ -2,6 +2,14 @@
 
 All notable changes to Tetra Dispatch, newest first.
 
+## Unreleased
+
+- **Emergency calls.** An emergency group call (priority 15) is now taken and
+  played even when the console is not listening to that group, takes the
+  speaker over from an ordinary group call, and shows a red "EMERGENCY ACTIVE"
+  ribbon with the calling ISSI and group while it lasts. Needs a brew-server
+  that pushes emergency calls to consoles (brew-server after 1.16.0).
+
 ## 1.0.0
 
 First release. Tetra Dispatch is a browser dispatch console that connects
