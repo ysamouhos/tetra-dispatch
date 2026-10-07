@@ -189,7 +189,17 @@ pub struct Dispatcher {
     sds_ref: u8,
     /// SHORT_TRANSFER headers waiting for their SDS_TRANSFER frame.
     sds_pending: HashMap<Uuid, (u32, u32)>,
+    /// Emergencies brew-server last reported (ISSI → called group), and when. brew-server
+    /// re-sends the list every few seconds while any is active, so a list that goes quiet
+    /// (link trouble) expires after `ALARMS_STALE`.
+    alarms: BTreeMap<u32, Option<u32>>,
+    alarms_at: Option<Instant>,
 }
+
+/// How long a list from brew-server stays valid without a refresh.
+const ALARMS_STALE: Duration = Duration::from_secs(15);
+/// `CLASS_SERVICE` type brew-server pushes: the active emergencies.
+const SERVICE_EMERGENCY: u8 = 0x11;
 
 fn epoch_ms() -> u64 {
     std::time::SystemTime::now()
@@ -237,6 +247,8 @@ impl Dispatcher {
             polls: HashMap::new(),
             sds_ref: 0,
             sds_pending: HashMap::new(),
+            alarms: BTreeMap::new(),
+            alarms_at: None,
         }
     }
 
@@ -349,7 +361,31 @@ impl Dispatcher {
                 self.last_error = Some(format!("brew-server error {}", e.error_type));
             }
             BrewMessage::Subscriber(s) => debug!("brew: subscriber msg type={} issi={}", s.msg_type, s.number),
+            BrewMessage::Service(s) if s.service_type == SERVICE_EMERGENCY => self.on_emergencies(&s.json_data),
             BrewMessage::Service(s) => debug!("brew: service type={} {}", s.service_type, s.json_data),
+        }
+    }
+
+    /// brew-server's list of active emergencies: `{"emergencies":[{"issi":N,"dest":G|null}]}`.
+    fn on_emergencies(&mut self, json: &str) {
+        let Ok(v) = serde_json::from_str::<Value>(json) else {
+            debug!("brew: malformed emergency list");
+            return;
+        };
+        let list: BTreeMap<u32, Option<u32>> = v["emergencies"].as_array().into_iter().flatten()
+            .filter_map(|e| Some((u32::try_from(e["issi"].as_u64()?).ok()?, e["dest"].as_u64().and_then(|d| u32::try_from(d).ok()))))
+            .collect();
+        let was_active = !self.alarms.is_empty();
+        for (issi, dest) in &list {
+            if !self.alarms.contains_key(issi) {
+                self.note("emergency", json!({"issi": issi, "gssi": dest}));
+            }
+        }
+        let changed = list != self.alarms;
+        self.alarms = list;
+        self.alarms_at = (!self.alarms.is_empty()).then(Instant::now);
+        if changed || was_active != !self.alarms.is_empty() {
+            self.push_status();
         }
     }
 
@@ -921,6 +957,11 @@ impl Dispatcher {
             self.preempt_until = None;
             changed = true;
         }
+        if self.alarms_at.is_some_and(|t| t.elapsed() > ALARMS_STALE) {
+            self.alarms.clear();
+            self.alarms_at = None;
+            changed = true;
+        }
         // Re-send location requests that have come due.
         let due: Vec<u32> = self.polls.iter().filter(|(_, (_, next))| now >= *next).map(|(&i, _)| i).collect();
         for issi in due {
@@ -937,6 +978,13 @@ impl Dispatcher {
     fn status(&self) -> Value {
         let rx = self.playing.and_then(|u| self.rx.get(&u)).map(|c| json!({"gssi": c.gssi, "source": c.source}));
         let active: Vec<Value> = self.rx.values().map(|c| json!({"gssi": c.gssi, "source": c.source, "emergency": c.emergency})).collect();
+        // Every emergency the console knows: calls it hears at priority 15 and the list
+        // brew-server pushes (alarms, and calls on groups relayed from other servers).
+        let mut emergencies: BTreeMap<u32, Option<u32>> = self.alarms.clone();
+        for c in self.rx.values().filter(|c| c.emergency) {
+            emergencies.insert(c.source, Some(c.gssi));
+        }
+        let emergencies: Vec<Value> = emergencies.iter().map(|(&issi, &gssi)| json!({"issi": issi, "gssi": gssi})).collect();
         let private = if let Some(p) = &self.private {
             json!({
                 "peer": p.peer, "duplex": p.duplex, "inbound": p.inbound, "phase": p.phase.name(),
@@ -962,6 +1010,7 @@ impl Dispatcher {
             "preempt_offer": self.preempt_until.is_some(),
             "rx": rx,
             "active": active,
+            "emergencies": emergencies,
             "private": private,
             "polls": self.polls.iter().map(|(&i, (p, _))| json!({"issi": i, "period_s": p.as_secs()})).collect::<Vec<_>>(),
             "operator": self.owner.and_then(|id| self.clients.get(&id)),
@@ -1086,6 +1135,32 @@ mod tests {
         assert_eq!(d.status()["rx"]["gssi"], 91);
         d.handle(Event::Brew(build_group_idle(&em2, 0)));
         assert!(d.status()["active"].as_array().unwrap().iter().all(|a| a["emergency"] == false));
+    }
+
+    #[test]
+    fn brew_servers_emergency_list_is_shown_and_expires() {
+        let (mut d, _ui, _rx) = setup();
+        let msg = |json: &str| {
+            let mut m = vec![0xf4, 0x11];
+            m.extend_from_slice(json.as_bytes());
+            m.push(0);
+            m
+        };
+        d.handle(Event::Brew(msg(r#"{"emergencies":[{"issi":4013,"dest":91},{"issi":4020,"dest":null}]}"#)));
+        let e = d.status()["emergencies"].clone();
+        assert_eq!(e, json!([{"issi": 4013, "gssi": 91}, {"issi": 4020, "gssi": null}]));
+        // A call heard at priority 15 is listed too, merged by ISSI.
+        let em = Uuid::new_v4();
+        d.handle(Event::Brew(build_group_tx(&em, 4020, 99, EMERGENCY_PRIORITY, 0, None)));
+        assert_eq!(d.status()["emergencies"][1], json!({"issi": 4020, "gssi": 99}));
+        // An empty list clears the alarms; stale ones expire on their own.
+        d.handle(Event::Brew(msg(r#"{"emergencies":[]}"#)));
+        assert_eq!(d.status()["emergencies"], json!([{"issi": 4020, "gssi": 99}]), "only the live call remains");
+        d.handle(Event::Brew(msg(r#"{"emergencies":[{"issi":4013,"dest":null}]}"#)));
+        d.alarms_at = Some(Instant::now() - ALARMS_STALE - Duration::from_secs(1));
+        d.on_tick();
+        assert!(d.alarms.is_empty());
+        d.handle(Event::Brew(msg("not json")));
     }
 
     #[test]

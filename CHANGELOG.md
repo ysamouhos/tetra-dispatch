@@ -4,6 +4,13 @@ All notable changes to Tetra Dispatch, newest first.
 
 ## Unreleased
 
+- **Emergency list from brew-server.** The red ribbon now also covers an
+  emergency alarm with no call running, from the list brew-server pushes
+  (service message `0x11`); it merges with the emergency calls the console
+  hears. The list expires after 15 s without a refresh.
+- **Red radio on the map.** A radio in an emergency is drawn red and pulsing
+  with an EMERGENCY popup; an emergency radio with no position yet is named in
+  the map line.
 - **Emergency calls.** An emergency group call (priority 15) is now taken and
   played even when the console is not listening to that group, takes the
   speaker over from an ordinary group call, and shows a red "EMERGENCY ACTIVE"
