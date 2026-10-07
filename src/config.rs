@@ -1,4 +1,4 @@
-//! `tetra-dispatch.toml`.
+//! `tetra-dispatch.toml` (an example is in `sample/`).
 
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn example_config_parses() {
-        let text = include_str!("../tetra-dispatch.toml");
+        let text = include_str!("../sample/tetra-dispatch.toml");
         let cfg: Config = toml::from_str(text).unwrap();
         cfg.validate().unwrap();
         assert_eq!(cfg.web.listen, "0.0.0.0:8443");

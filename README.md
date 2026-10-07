@@ -37,7 +37,7 @@ You need a Rust toolchain and a C compiler.
 
 ```bash
 cargo build --release
-./target/release/tetra-dispatch tetra-dispatch.toml
+./target/release/tetra-dispatch sample/tetra-dispatch.toml   # the example; copy and edit it for your own
 ```
 
 Then open `http://<host>:8443/` (or `https://` with `tls = true`). The console
@@ -86,7 +86,7 @@ and `tls_pinned_cert_path` to a copy of its `server.crt`.
 | `src/sds.rs` | SDS text encode/decode |
 | `src/web.rs` | Console HTTP and WebSocket (JSON commands, binary PCM) |
 | `static/index.html` | The console (ES/EN, light/dark) |
-| `tetra-dispatch.toml` | Example configuration |
+| `sample/tetra-dispatch.toml` | Example configuration |
 
 ```bash
 cargo test
