@@ -66,6 +66,12 @@ th{color:var(--muted);font-weight:500}
 .leaflet-tooltip.talk{background:var(--tx);color:#fff;border-color:var(--tx);font-weight:650}
 .leaflet-tooltip.talk::before{border-top-color:var(--tx)}
 .banner{padding:10px 16px;background:var(--warn);color:#fff;text-align:center}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;z-index:1000}
+.modal .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;width:100%;max-width:360px}
+.modal h3{margin:0 0 6px;font-size:16px}
+.modal p{margin:0 0 12px;color:var(--muted);font-size:14px}
+.modal input{width:100%;margin-bottom:12px}
+.modal .row{justify-content:flex-end}
 </style>
 </head>
 <body>
@@ -159,6 +165,17 @@ th{color:var(--muted);font-weight:500}
     <div id="log" class="list"></div>
   </section>
 </main>
+<div id="al-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="al-title">
+  <div class="box">
+    <h3 id="al-title" data-t="al_auth_title"></h3>
+    <p data-t="al_auth_msg"></p>
+    <input id="al-pass" type="password" autocomplete="off" data-tp="al_auth_label">
+    <div class="row">
+      <button id="al-cancel" data-t="cancel"></button>
+      <button id="al-ok" class="amb" data-t="ambience"></button>
+    </div>
+  </div>
+</div>
 <script>
 'use strict';
 const LANGS={
@@ -175,6 +192,8 @@ const LANGS={
     group_rx:'Group call',group_tx:'Dispatcher transmitted',loc_req_once:'Location requested',loc_req_poll:'Location polling started',loc_req_stop:'Location polling stopped',link_up:'Brew link up',link_down:'Brew link down',
     priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
     delivered:'delivered',logs:'Logs',ambience:'Ambient listen',amb_hint:'Open a listening call to the radio. The radio shows the call — this is not covert. The brew-server only relays the call, so it works only if the radio/basestation supports ambience listening.',ambience_call:'Ambient Listen Call',locate:'Locate',loc_once:'Locate once',loc_every:'every',seconds:'s',loc_poll:'Start polling',loc_stop:'Stop',polling:'Polling: ',listen_only:'Listening (radio talks)',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
+    al_auth_title:'Authorize ambient listen',al_auth_msg:'Ambient listen needs authorization. Enter the password to open a listening call.',al_auth_label:'Authorization password',cancel:'Cancel',al_denied:'Ambient-listen authorization failed',
+    amb_log:'Ambient listen',amb_started:'started',amb_denied:'authorization denied',
     causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
       7:'incompatible',8:'service not supported',9:'pre-empted',10:'invalid identity',11:'SwMI disconnect',12:'no idle cc',
       13:'timeout',14:'SwMI disconnect'}},
@@ -191,6 +210,8 @@ const LANGS={
     group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',loc_req_once:'Localización solicitada',loc_req_poll:'Sondeo de localización iniciado',loc_req_stop:'Sondeo de localización detenido',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
     priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
     delivered:'entregado',logs:'Registros',ambience:'Escucha ambiente',amb_hint:'Abre una llamada de escucha a la radio. La radio muestra la llamada — no es encubierto. El brew-server solo reenvía la llamada, así que funciona solo si la radio/estación base admite escucha ambiente.',ambience_call:'Llamada de escucha ambiente',locate:'Localización',loc_once:'Localizar',loc_every:'cada',seconds:'s',loc_poll:'Sondear',loc_stop:'Parar',polling:'Sondeando: ',listen_only:'Escuchando (habla la radio)',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
+    al_auth_title:'Autorizar escucha ambiente',al_auth_msg:'La escucha ambiente requiere autorización. Introduce la contraseña para abrir la llamada de escucha.',al_auth_label:'Contraseña de autorización',cancel:'Cancelar',al_denied:'Autorización de escucha ambiente fallida',
+    amb_log:'Escucha ambiente',amb_started:'iniciada',amb_denied:'autorización denegada',
     causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
       7:'incompatible',8:'servicio no soportado',9:'expulsado',10:'identidad no válida',11:'desconexión de red',12:'sin canal',
       13:'tiempo agotado',14:'desconexión de red'}},
@@ -228,7 +249,7 @@ function connect(){
     else if(m.type==='position'){positions[m.pos.issi]=m.pos;renderMap()}
     else if(m.type==='log'){logs.push(m.entry);if(logs.length>100)logs.shift();renderLog()}
     else if(m.type==='sds'){sdsMsgs.push(m.msg);if(sdsMsgs.length>100)sdsMsgs.shift();renderSds()}
-    else if(m.type==='error'){flash=t(m.error==='busy'?'busy_pos':'not_op');render()}
+    else if(m.type==='error'){flash=t({busy:'busy_pos',al_denied:'al_denied'}[m.error]||'not_op');render()}
   };
 }
 
@@ -317,7 +338,16 @@ $('tgs').addEventListener('click',e=>{const g=parseInt(e.target.dataset.rm,10);i
 // ── Private calls ────────────────────────────────────────────────────
 function dial(duplex){const n=parseInt($('dial').value,10);if(!(n>0))return;flash='';send({type:'call',issi:n,duplex:duplex})}
 $('call-duplex').onclick=()=>dial(true);$('call-simplex').onclick=()=>dial(false);
-$('call-ambience').onclick=()=>{const n=parseInt($('dial').value,10);if(!(n>0))return;flash='';send({type:'ambience',issi:n})};
+function sendAmbience(issi,password){flash='';send(password==null?{type:'ambience',issi:issi}:{type:'ambience',issi:issi,password:password})}
+let alIssi=0;
+function openAlModal(issi){alIssi=issi;$('al-pass').value='';$('al-modal').classList.remove('hidden');$('al-pass').focus()}
+function closeAlModal(){$('al-modal').classList.add('hidden');alIssi=0}
+$('call-ambience').onclick=()=>{const n=parseInt($('dial').value,10);if(!(n>0))return;
+  if(st.ambience_auth)openAlModal(n);else sendAmbience(n,null)};
+$('al-ok').onclick=()=>{const issi=alIssi,pw=$('al-pass').value;closeAlModal();if(issi>0)sendAmbience(issi,pw)};
+$('al-cancel').onclick=closeAlModal;
+$('al-pass').addEventListener('keydown',e=>{if(e.key==='Enter')$('al-ok').click();else if(e.key==='Escape')closeAlModal()});
+$('al-modal').addEventListener('click',e=>{if(e.target===$('al-modal'))closeAlModal()});
 function locate(n,period){if(!(n>0))return;send({type:'locate',issi:n,period_s:period})}
 $('loc-once').onclick=()=>locate(parseInt($('loc-issi').value,10),0);
 $('loc-poll').onclick=()=>locate(parseInt($('loc-issi').value,10),Math.max(5,parseInt($('loc-period').value,10)||30));
@@ -386,6 +416,7 @@ function renderLog(){
     else if(e.kind==='location_req')txt=(e.period_s?t('loc_req_poll')+` · ${e.period_s}s`:t('loc_req_once'))+` · ${esc(e.issi)}`;
     else if(e.kind==='private'){txt=t('priv_'+e.event)+` ${e.dir==='in'?'←':'→'} ${esc(e.peer)}`;
       if(e.secs!=null)txt+=` · ${fmtSecs(e.secs)}`;if(e.event!=='connected'&&e.cause!=null)txt+=` · ${causeText(e.cause)}`}
+    else if(e.kind==='ambience')txt=`${t('amb_log')} → ${esc(e.issi)} · ${e.authorized?t('amb_started'):t('amb_denied')}`;
     return `<div class="msg"><span class="meta">${hhmm(e.ts)}</span> ${txt}</div>`}).join('');
 }
 function render(){

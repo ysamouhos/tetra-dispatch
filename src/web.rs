@@ -184,7 +184,10 @@ fn parse_command(text: &str) -> Option<UiCmd> {
         "answer" => UiCmd::Answer,
         "hangup" => UiCmd::Hangup,
         "sds" => UiCmd::Sds { dest: ssi(&v, "to"), text: v.get("text")?.as_str()?.to_string() },
-        "ambience" => UiCmd::AmbienceListen { issi: ssi(&v, "issi") },
+        "ambience" => UiCmd::AmbienceListen {
+            issi: ssi(&v, "issi"),
+            password: v.get("password").and_then(Value::as_str).unwrap_or("").to_string(),
+        },
         "locate" => UiCmd::LocationRequest {
             issi: ssi(&v, "issi"),
             period_s: v.get("period_s").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(0),

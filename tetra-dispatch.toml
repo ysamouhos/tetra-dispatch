@@ -24,6 +24,10 @@ groups = []
 # Talkgroup PTT transmits on (0 = the first of `groups`).
 tx_group = 0
 priority = 0
+# Password that authorizes ambient-listen (AL) calls. Empty = no authorization
+# required. When set, the console prompts for it before an AL call and every
+# attempt is recorded in the activity log.
+ambience_password = ""
 
 [web]
 # Browsers allow the microphone only on https:// or http://localhost: enable

@@ -67,8 +67,9 @@ pub enum UiCmd {
     Answer,
     Hangup,
     Sds { dest: u32, text: String },
-    /// Ambience-listening call to a radio (indicated on the radio).
-    AmbienceListen { issi: u32 },
+    /// Ambience-listening call to a radio (indicated on the radio). `password`
+    /// is checked against `dispatch.ambience_password` when one is configured.
+    AmbienceListen { issi: u32, password: String },
     /// Request a position report. `period_s` 0 = once; otherwise poll every
     /// `period_s` seconds. A new period for the same ISSI replaces the old.
     LocationRequest { issi: u32, period_s: u32 },
@@ -193,6 +194,11 @@ fn epoch_ms() -> u64 {
 
 fn epoch_ms_at(t: Instant) -> u64 {
     epoch_ms().saturating_sub(t.elapsed().as_millis() as u64)
+}
+
+/// Length-independent constant-time byte comparison for secret checks.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 impl Dispatcher {
@@ -558,6 +564,22 @@ impl Dispatcher {
         self.start_call(dest, duplex, false);
     }
 
+    /// Start an ambience-listening (AL) call after checking the configured
+    /// authorization password. Every attempt — allowed or denied — is recorded
+    /// in the activity log.
+    fn ambience_listen(&mut self, id: ClientId, issi: u32, password: &str) {
+        let required = &self.cfg.ambience_password;
+        if !required.is_empty() && !constant_time_eq(password.as_bytes(), required.as_bytes()) {
+            self.note("ambience", json!({"issi": issi, "authorized": false}));
+            self.last_error = Some("ambient-listen authorization failed".into());
+            self.send_to(id, json!({"type": "error", "error": "al_denied"}));
+            warn!(issi, "ambient-listen denied: wrong authorization password");
+            return;
+        }
+        self.note("ambience", json!({"issi": issi, "authorized": true}));
+        self.start_call(issi, false, true);
+    }
+
     /// Set up an outgoing individual call. `ambience` requests a TETRA
     /// ambience-listening call: a simplex call where only the radio talks and
     /// the console never keys. The radio shows the call like any normal call;
@@ -700,7 +722,7 @@ impl Dispatcher {
             UiCmd::Answer => self.answer(),
             UiCmd::Hangup => self.hangup(),
             UiCmd::Sds { dest, text } => self.send_text(dest, text),
-            UiCmd::AmbienceListen { issi } => self.start_call(issi, false, true),
+            UiCmd::AmbienceListen { issi, password } => self.ambience_listen(id, issi, &password),
             UiCmd::LocationRequest { issi, period_s } => self.request_location(issi, period_s),
             UiCmd::LocationStop { issi } => {
                 self.polls.remove(&issi);
@@ -930,6 +952,7 @@ impl Dispatcher {
             "private": private,
             "polls": self.polls.iter().map(|(&i, (p, _))| json!({"issi": i, "period_s": p.as_secs()})).collect::<Vec<_>>(),
             "operator": self.owner.and_then(|id| self.clients.get(&id)),
+            "ambience_auth": !self.cfg.ambience_password.is_empty(),
             "last_error": self.last_error,
         })
     }
@@ -951,8 +974,11 @@ mod tests {
     const OP: u32 = 9_990_001;
 
     fn setup() -> (Dispatcher, broadcast::Receiver<UiOut>, mpsc::Receiver<Vec<u8>>) {
+        setup_with(DispatchConfig { operator_issi: OP, groups: vec![91, 92], tx_group: 91, priority: 0, ambience_password: String::new() })
+    }
+
+    fn setup_with(cfg: DispatchConfig) -> (Dispatcher, broadcast::Receiver<UiOut>, mpsc::Receiver<Vec<u8>>) {
         let (ui, ui_rx) = broadcast::channel(256);
-        let cfg = DispatchConfig { operator_issi: OP, groups: vec![91, 92], tx_group: 91, priority: 0 };
         let mut d = Dispatcher::new(cfg, ui);
         let (tx, rx) = mpsc::channel(64);
         d.handle(Event::LinkUp(tx));
@@ -1145,5 +1171,52 @@ mod tests {
             }
         }
         assert!(refused);
+    }
+
+    fn setup_al(password: &str) -> (Dispatcher, broadcast::Receiver<UiOut>, mpsc::Receiver<Vec<u8>>) {
+        setup_with(DispatchConfig {
+            operator_issi: OP, groups: vec![91, 92], tx_group: 91, priority: 0,
+            ambience_password: password.to_string(),
+        })
+    }
+
+    fn last_log(d: &Dispatcher) -> (Option<&str>, Option<bool>) {
+        let e = d.log.back().unwrap();
+        (e["kind"].as_str(), e["authorized"].as_bool())
+    }
+
+    #[test]
+    fn ambience_without_password_starts_and_logs() {
+        let (mut d, _ui, mut rx) = setup();
+        drain(&mut rx);
+        d.handle(Event::Ui(1, UiCmd::AmbienceListen { issi: 2001, password: String::new() }));
+        let msgs = drain(&mut rx);
+        let BrewMessage::CallControl(cc) = &msgs[0] else { panic!("no setup request") };
+        assert_eq!(cc.call_state, CALL_STATE_SETUP_REQUEST);
+        let BrewCallPayload::CircularCall(call) = &cc.payload else { panic!() };
+        assert_eq!(call.service, SERVICE_AMBIENCE_LISTENING);
+        assert_eq!(last_log(&d), (Some("ambience"), Some(true)));
+        assert!(d.status()["ambience_auth"] == false);
+    }
+
+    #[test]
+    fn ambience_wrong_password_is_denied_and_logged() {
+        let (mut d, _ui, mut rx) = setup_al("secret");
+        drain(&mut rx);
+        d.handle(Event::Ui(1, UiCmd::AmbienceListen { issi: 2001, password: "wrong".into() }));
+        assert!(call_states(&drain(&mut rx)).is_empty(), "no call on a failed authorization");
+        assert!(d.private.is_none());
+        assert_eq!(last_log(&d), (Some("ambience"), Some(false)));
+        assert!(d.status()["ambience_auth"] == true);
+    }
+
+    #[test]
+    fn ambience_right_password_starts() {
+        let (mut d, _ui, mut rx) = setup_al("secret");
+        drain(&mut rx);
+        d.handle(Event::Ui(1, UiCmd::AmbienceListen { issi: 2001, password: "secret".into() }));
+        assert_eq!(call_states(&drain(&mut rx)), vec![CALL_STATE_SETUP_REQUEST]);
+        assert!(d.private.as_ref().is_some_and(|p| p.ambience));
+        assert_eq!(last_log(&d), (Some("ambience"), Some(true)));
     }
 }
