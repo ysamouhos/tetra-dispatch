@@ -2,14 +2,16 @@
 
 All notable changes to Tetra Dispatch, newest first.
 
-## Unreleased
+## 1.2.0
 
+- **Example config in `sample/`.** `tetra-dispatch.toml` moved to
+  `sample/tetra-dispatch.toml`; run `tetra-dispatch sample/tetra-dispatch.toml`
+  or your own copy.
 - **Block ISSIs from the console.** A "Blocked ISSIs" card (and a Block button in
   a radio's map popup) lets the operator block and unblock ISSIs on the connected
   brew-server. brew-server decides whether this console may
   (`[blacklist] console_users`); otherwise the card is view-only and says so.
-  The list shown follows brew-server's. Needs a brew-server after 1.16.0.
-
+  The list shown follows brew-server's. Needs brew-server 1.16.2 or later.
 - **Emergency list from brew-server.** The red ribbon now also covers an
   emergency alarm with no call running, from the list brew-server pushes
   (service message `0x11`); it merges with the emergency calls the console
@@ -21,7 +23,7 @@ All notable changes to Tetra Dispatch, newest first.
   played even when the console is not listening to that group, takes the
   speaker over from an ordinary group call, and shows a red "EMERGENCY ACTIVE"
   ribbon with the calling ISSI and group while it lasts. Needs a brew-server
-  that pushes emergency calls to consoles (brew-server after 1.16.0).
+  that pushes emergency calls to consoles (brew-server 1.16.2 or later).
 
 ## 1.0.0
 
