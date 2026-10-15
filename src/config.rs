@@ -64,6 +64,9 @@ pub struct DispatchConfig {
     /// AL call starts, and every attempt is recorded in the activity log.
     #[serde(default)]
     pub ambience_password: String,
+    /// Directory server-side voice recordings (WAV) are written to.
+    #[serde(default = "default_recordings_dir")]
+    pub recordings_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -90,11 +93,12 @@ fn default_path() -> String { "/brew/".into() }
 fn default_ca_path() -> PathBuf { "/etc/ssl/certs/ca-certificates.crt".into() }
 fn default_reconnect() -> u64 { 5 }
 fn default_operator_issi() -> u32 { 9_990_001 }
+fn default_recordings_dir() -> PathBuf { "recordings".into() }
 fn default_listen() -> String { "0.0.0.0:8443".into() }
 
 impl Default for DispatchConfig {
     fn default() -> Self {
-        Self { operator_issi: default_operator_issi(), groups: Vec::new(), tx_group: 0, priority: 0, ambience_password: String::new() }
+        Self { operator_issi: default_operator_issi(), groups: Vec::new(), tx_group: 0, priority: 0, ambience_password: String::new(), recordings_dir: default_recordings_dir() }
     }
 }
 

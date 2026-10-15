@@ -180,6 +180,18 @@ th{color:var(--muted);font-weight:500}
   </section>
 
   <section class="card span2">
+    <h2 data-t="rec_title"></h2>
+    <div class="row">
+      <button id="rec-server" class="danger" data-t="rec_server"></button>
+      <button id="rec-client" data-t="rec_client"></button>
+      <span id="rec-state" class="muted"></span>
+      <span class="grow"></span>
+      <button id="rec-refresh" data-t="rec_refresh"></button>
+    </div>
+    <div id="rec-list" class="list" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card span2">
     <h2 data-t="activity"></h2>
     <div id="log" class="list"></div>
   </section>
@@ -192,6 +204,16 @@ th{color:var(--muted);font-weight:500}
     <div class="row">
       <button id="al-cancel" data-t="cancel"></button>
       <button id="al-ok" class="amb" data-t="ambience"></button>
+    </div>
+  </div>
+</div>
+<div id="rec-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="rec-title">
+  <div class="box">
+    <h3 id="rec-title" data-t="rec_name_title"></h3>
+    <input id="rec-name" type="text" maxlength="64" autocomplete="off" data-tp="rec_name">
+    <div class="row">
+      <button id="rec-cancel" data-t="cancel"></button>
+      <button id="rec-ok" class="primary" data-t="rec_ok"></button>
     </div>
   </div>
 </div>
@@ -211,7 +233,8 @@ const LANGS={
     group_rx:'Group call',no_position:'no position',emergency:'EMERGENCY ACTIVE',emerg_call:'emergency call',group_tx:'Dispatcher transmitted',loc_req_once:'Location requested',loc_req_poll:'Location polling started',loc_req_stop:'Location polling stopped',link_up:'Brew link up',link_down:'Brew link down',
     priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
     delivered:'delivered',blocked:'Blocked ISSIs',block:'Block',unblock:'Unblock',block_none:'No ISSI is blocked',block_na:'This console may not edit the blacklist on this brew-server',block_hint:'A blocked radio cannot call, send SDS or transmit through the brew-server. Emergency calls, ambient listen and location requests still work.',block_log:'Blocked',unblock_log:'Unblocked',logs:'Logs',ambience:'Ambient listen',amb_hint:'Open a listening call to the radio. The radio shows the call — this is not covert. The brew-server only relays the call, so it works only if the radio/basestation supports ambience listening.',ambience_call:'Ambient Listen Call',locate:'Locate',loc_once:'Locate once',loc_every:'every',seconds:'s',loc_poll:'Start polling',loc_stop:'Stop',polling:'Polling: ',listen_only:'Listening (radio talks)',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
-    al_auth_title:'Authorize ambient listen',al_auth_msg:'Ambient listen needs authorization. Enter the password to open a listening call.',al_auth_label:'Authorization password',cancel:'Cancel',al_denied:'Ambient-listen authorization failed',
+    al_auth_title:'Authorize ambient listen',al_auth_msg:'Ambient listen needs authorization. Enter the password to open a listening call.',al_auth_label:'Authorization password',cancel:'Cancel',rec_title:'Recordings',rec_server:'Record on server',rec_client:'Record on this device',rec_stop:'Stop',rec_refresh:'Refresh',
+    rec_name_title:'Recording name',rec_name:'File name',rec_ok:'Save',rec_on:'Recording on server: ',rec_local:'Recording on this device…',rec_none:'No recordings',rec_dl:'Download',rec_need_op:'Take the position to record on the server',al_denied:'Ambient-listen authorization failed',
     amb_log:'Ambient listen',amb_started:'started',amb_denied:'authorization denied',
     causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
       7:'incompatible',8:'service not supported',9:'pre-empted',10:'invalid identity',11:'SwMI disconnect',12:'no idle cc',
@@ -229,7 +252,8 @@ const LANGS={
     group_rx:'Llamada de grupo',no_position:'sin posición',emergency:'EMERGENCIA ACTIVA',emerg_call:'llamada de emergencia',group_tx:'Transmitió el despacho',loc_req_once:'Localización solicitada',loc_req_poll:'Sondeo de localización iniciado',loc_req_stop:'Sondeo de localización detenido',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
     priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
     delivered:'entregado',blocked:'ISSI bloqueados',block:'Bloquear',unblock:'Desbloquear',block_none:'Ningún ISSI bloqueado',block_na:'Esta consola no puede editar la lista negra de este brew-server',block_hint:'Una radio bloqueada no puede llamar, enviar SDS ni transmitir por el brew-server. Las llamadas de emergencia, la escucha ambiente y las peticiones de localización siguen funcionando.',block_log:'Bloqueado',unblock_log:'Desbloqueado',logs:'Registros',ambience:'Escucha ambiente',amb_hint:'Abre una llamada de escucha a la radio. La radio muestra la llamada — no es encubierto. El brew-server solo reenvía la llamada, así que funciona solo si la radio/estación base admite escucha ambiente.',ambience_call:'Llamada de escucha ambiente',locate:'Localización',loc_once:'Localizar',loc_every:'cada',seconds:'s',loc_poll:'Sondear',loc_stop:'Parar',polling:'Sondeando: ',listen_only:'Escuchando (habla la radio)',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
-    al_auth_title:'Autorizar escucha ambiente',al_auth_msg:'La escucha ambiente requiere autorización. Introduce la contraseña para abrir la llamada de escucha.',al_auth_label:'Contraseña de autorización',cancel:'Cancelar',al_denied:'Autorización de escucha ambiente fallida',
+    al_auth_title:'Autorizar escucha ambiente',al_auth_msg:'La escucha ambiente requiere autorización. Introduce la contraseña para abrir la llamada de escucha.',al_auth_label:'Contraseña de autorización',cancel:'Cancelar',rec_title:'Grabaciones',rec_server:'Grabar en el servidor',rec_client:'Grabar en este equipo',rec_stop:'Parar',rec_refresh:'Actualizar',
+    rec_name_title:'Nombre de la grabación',rec_name:'Nombre del archivo',rec_ok:'Guardar',rec_on:'Grabando en el servidor: ',rec_local:'Grabando en este equipo…',rec_none:'Sin grabaciones',rec_dl:'Descargar',rec_need_op:'Toma el puesto para grabar en el servidor',al_denied:'Autorización de escucha ambiente fallida',
     amb_log:'Escucha ambiente',amb_started:'iniciada',amb_denied:'autorización denegada',
     causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
       7:'incompatible',8:'servicio no soportado',9:'expulsado',10:'identidad no válida',11:'desconexión de red',12:'sin canal',
@@ -313,14 +337,79 @@ function onMic(f32){
   for(let i=0;i<n;i++){const x=i*ratio,i0=Math.floor(x),a=f32[i0]||0,b=f32[Math.min(i0+1,f32.length-1)]||0;
     const s=Math.max(-1,Math.min(1,a+(b-a)*(x-i0)));pcm[i]=s*32767|0}
   const m=new Int16Array(ulAcc.length+pcm.length);m.set(ulAcc);m.set(pcm,ulAcc.length);
+  if(cRec)cRec.push(pcm.slice());
   let off=0;while(m.length-off>=FRAME){ws.send(m.slice(off,off+FRAME).buffer);off+=FRAME}
   ulAcc=m.slice(off);
 }
 function playPcm(pcm){
+  if(cRec&&pcm.length)cRec.push(pcm.slice());
   if(!actx||!dlNode||!pcm.length)return;
   const ratio=actx.sampleRate/8000,n=Math.floor(pcm.length*ratio),out=new Float32Array(n);
   for(let i=0;i<n;i++){const x=i/ratio,i0=Math.floor(x),a=pcm[i0]||0,b=pcm[Math.min(i0+1,pcm.length-1)]||0;out[i]=(a+(b-a)*(x-i0))/32768}
   dlNode.port.postMessage(out,[out.buffer]);
+}
+
+// ── Recording ────────────────────────────────────────────────────────
+// Server: the operator's traffic is written to a WAV on the server. Client:
+// received + transmitted audio is kept in the browser and saved as a WAV.
+let cRec=null,cPending=null,recMode=null,recWasOn=false;
+function defaultRecName(){const d=new Date(),p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'-'+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds())}
+// File names always start with YYYYMMDD-HHMMSS.
+function stamped(name){name=name.trim();return /^\d{8}-\d{6}/.test(name)?name:(name?defaultRecName()+'-'+name:defaultRecName())}
+function openRecModal(mode){recMode=mode;$('rec-name').value=defaultRecName();$('rec-modal').classList.remove('hidden');$('rec-name').focus();$('rec-name').select()}
+function closeRecModal(){$('rec-modal').classList.add('hidden');recMode=null;cPending=null}
+function wavBlob(chunks){
+  const n=chunks.reduce((a,c)=>a+c.length,0),b=new ArrayBuffer(44+n*2),v=new DataView(b);
+  const w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i))};
+  w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+  v.setUint32(24,8000,true);v.setUint32(28,16000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
+  let o=44;for(const c of chunks)for(let i=0;i<c.length;i++,o+=2)v.setInt16(o,c[i],true);
+  return new Blob([b],{type:'audio/wav'});
+}
+function saveLocal(name){
+  const stem=stamped(name).replace(/\.wav$/i,'').replace(/[\\/:*?"<>|\s]+/g,'_').replace(/^\.+/,'').slice(0,64)||defaultRecName();
+  const a=document.createElement('a');a.href=URL.createObjectURL(wavBlob(cPending));a.download=stem+'.wav';
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+}
+$('rec-client').onclick=()=>{
+  if(cRec){cPending=cRec;cRec=null;renderRec();if(cPending.length)openRecModal('client');else cPending=null}
+  else{cRec=[];renderRec()}
+};
+$('rec-server').onclick=()=>{
+  if(st.recording)send({type:'rec_stop'});
+  else if(st.you_operate)openRecModal('server');
+};
+$('rec-ok').onclick=()=>{
+  const name=$('rec-name').value,mode=recMode;
+  if(mode==='client'&&cPending)saveLocal(name);
+  else if(mode==='server'&&name.trim())send({type:'rec_start',name:stamped(name)});
+  closeRecModal();
+};
+$('rec-cancel').onclick=closeRecModal;
+$('rec-name').addEventListener('keydown',e=>{if(e.key==='Enter')$('rec-ok').click();else if(e.key==='Escape')closeRecModal()});
+$('rec-refresh').onclick=()=>refreshRecs();
+async function refreshRecs(){
+  try{
+    const r=await fetch('/recordings',{cache:'no-store'});if(!r.ok)return;
+    const l=await r.json();
+    $('rec-list').innerHTML=l.length?l.slice(0,50).map(e=>{
+      const u='/recordings/'+encodeURIComponent(e.name);
+      return `<div class="row" style="margin:4px 0"><a href="${u}?dl=1" download="${esc(e.name)}"><b>${esc(e.name)}</b></a><span class="muted">${esc(fmtSecs(e.seconds))} · ${esc((e.bytes/1048576).toFixed(1))} MB · ${esc(new Date(e.modified_ms).toLocaleString())}</span>`+
+        `<span class="grow"></span><audio controls preload="none" src="${u}" style="height:32px;max-width:260px"></audio>`+
+        `<a href="${u}?dl=1" download="${esc(e.name)}">${t('rec_dl')}</a></div>`}).join(''):`<span class="muted">${t('rec_none')}</span>`;
+  }catch(_){}
+}
+function renderRec(){
+  const on=!!st.recording;
+  $('rec-server').textContent=on?t('rec_stop'):t('rec_server');
+  $('rec-server').disabled=!on&&!st.you_operate;
+  $('rec-server').title=!on&&!st.you_operate?t('rec_need_op'):'';
+  $('rec-client').textContent=cRec?t('rec_stop'):t('rec_client');
+  $('rec-client').classList.toggle('danger',!!cRec);
+  $('rec-state').textContent=on?t('rec_on')+st.recording.file:cRec?t('rec_local'):'';
+  if(recWasOn&&!on)refreshRecs();
+  recWasOn=on;
 }
 
 // ── Operator position ────────────────────────────────────────────────
@@ -507,6 +596,7 @@ function render(){
   }
   tickTimer();
   renderMap();
+  renderRec();
 }
 function tickTimer(){const p=st.private;$('call-timer').textContent=p&&p.connected_ms?fmtSecs((Date.now()-p.connected_ms)/1000):''}
 setInterval(tickTimer,1000);
@@ -514,6 +604,7 @@ if(!window.isSecureContext)$('insecure').classList.remove('hidden');
 initMap();
 applyLang();
 connect();
+refreshRecs();
 </script>
 </body>
 </html>

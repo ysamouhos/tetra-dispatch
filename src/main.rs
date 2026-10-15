@@ -7,6 +7,7 @@ mod config;
 mod dispatcher;
 #[allow(dead_code)]
 mod protocol;
+mod recording;
 mod sds;
 mod web;
 
@@ -51,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     tokio::select! {
-        r = web::run(cfg.web.clone(), events_tx, ui_tx) => r,
+        r = web::run(cfg.web.clone(), cfg.dispatch.recordings_dir.clone(), events_tx, ui_tx) => r,
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("shutting down");
             Ok(())

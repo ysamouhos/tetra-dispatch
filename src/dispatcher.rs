@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::codec::Codec;
 use crate::config::{valid_ssi, DispatchConfig};
 use crate::protocol::*;
+use crate::recording::{self, Recorder};
 use crate::sds;
 
 pub type ClientId = u64;
@@ -77,6 +78,9 @@ pub enum UiCmd {
     LocationStop { issi: u32 },
     /// Block (or unblock) an ISSI on the connected brew-server's blacklist.
     Block { issi: u32, block: bool },
+    /// Start a server-side recording; `name` is the user's file name.
+    RecordStart { name: String },
+    RecordStop,
 }
 
 #[derive(Debug, Clone)]
@@ -199,6 +203,8 @@ pub struct Dispatcher {
     /// brew-server's ISSI blacklist as last pushed, and whether this console may edit it.
     blacklist: BTreeSet<u32>,
     can_block: bool,
+    /// Server-side voice recording in progress, and when it began.
+    recorder: Option<(Recorder, Instant)>,
 }
 
 /// How long a list from brew-server stays valid without a refresh.
@@ -258,6 +264,7 @@ impl Dispatcher {
             alarms_at: None,
             blacklist: BTreeSet::new(),
             can_block: false,
+            recorder: None,
         }
     }
 
@@ -585,6 +592,7 @@ impl Dispatcher {
         };
         let Some(owner) = self.owner.filter(|_| audible) else { return };
         if let Some(pcm) = self.codec.decode_ste(data) {
+            self.record(&pcm);
             let bytes = pcm.iter().flat_map(|s| s.to_le_bytes()).collect();
             let _ = self.ui.send(UiOut::Pcm(owner, bytes));
         }
@@ -827,6 +835,8 @@ impl Dispatcher {
             UiCmd::AmbienceListen { issi, password } => self.ambience_listen(id, issi, &password),
             UiCmd::Block { issi, block } => self.block_issi(issi, block),
             UiCmd::LocationRequest { issi, period_s } => self.request_location(issi, period_s),
+            UiCmd::RecordStart { name } => self.start_recording(&name),
+            UiCmd::RecordStop => self.stop_recording(),
             UiCmd::LocationStop { issi } => {
                 self.polls.remove(&issi);
                 self.push_status();
@@ -835,7 +845,51 @@ impl Dispatcher {
         }
     }
 
+    fn start_recording(&mut self, name: &str) {
+        if self.recorder.is_some() {
+            return;
+        }
+        let Some(stem) = recording::sanitize(name) else {
+            self.last_error = Some("invalid recording name".into());
+            return;
+        };
+        match Recorder::start(&self.cfg.recordings_dir, &stem) {
+            Ok(r) => {
+                info!(file = r.file_name(), "recording started");
+                self.recorder = Some((r, Instant::now()));
+                self.last_error = None;
+            }
+            Err(e) => {
+                warn!("recording: {e}");
+                self.last_error = Some(format!("recording: {e}"));
+            }
+        }
+    }
+
+    fn stop_recording(&mut self) {
+        if let Some((r, _)) = self.recorder.take() {
+            match r.finish() {
+                Ok(f) => info!(file = f, "recording saved"),
+                Err(e) => {
+                    warn!("recording: {e}");
+                    self.last_error = Some(format!("recording: {e}"));
+                }
+            }
+        }
+    }
+
+    fn record(&mut self, pcm: &[i16]) {
+        if let Some((r, _)) = self.recorder.as_mut() {
+            if let Err(e) = r.write(pcm) {
+                warn!("recording: {e}");
+                self.last_error = Some(format!("recording: {e}"));
+                self.stop_recording();
+            }
+        }
+    }
+
     fn release_position(&mut self) {
+        self.stop_recording();
         self.set_ptt(false);
         self.hangup();
         self.owner = None;
@@ -922,6 +976,7 @@ impl Dispatcher {
             (None, Some(t)) => t.uuid,
             (None, None) => return,
         };
+        self.record(pcm);
         for block in self.codec.encode_pcm(pcm) {
             self.send(build_voice_frame(&uuid, (block.len() * 8) as u16, &block));
         }
@@ -1067,6 +1122,7 @@ impl Dispatcher {
             "emergencies": emergencies,
             "blacklist": self.blacklist,
             "can_block": self.can_block,
+            "recording": self.recorder.as_ref().map(|(r, at)| json!({"file": r.file_name(), "started_ms": epoch_ms_at(*at)})),
             "private": private,
             "polls": self.polls.iter().map(|(&i, (p, _))| json!({"issi": i, "period_s": p.as_secs()})).collect::<Vec<_>>(),
             "operator": self.owner.and_then(|id| self.clients.get(&id)),
@@ -1092,7 +1148,7 @@ mod tests {
     const OP: u32 = 9_990_001;
 
     fn setup() -> (Dispatcher, broadcast::Receiver<UiOut>, mpsc::Receiver<Vec<u8>>) {
-        setup_with(DispatchConfig { operator_issi: OP, groups: vec![91, 92], tx_group: 91, priority: 0, ambience_password: String::new() })
+        setup_with(DispatchConfig { operator_issi: OP, groups: vec![91, 92], tx_group: 91, priority: 0, ambience_password: String::new(), ..Default::default() })
     }
 
     fn setup_with(cfg: DispatchConfig) -> (Dispatcher, broadcast::Receiver<UiOut>, mpsc::Receiver<Vec<u8>>) {
@@ -1385,8 +1441,9 @@ mod tests {
 
     fn setup_al(password: &str) -> (Dispatcher, broadcast::Receiver<UiOut>, mpsc::Receiver<Vec<u8>>) {
         setup_with(DispatchConfig {
-            operator_issi: OP, groups: vec![91, 92], tx_group: 91, priority: 0,
+            operator_issi: OP, groups: vec![91, 92], tx_group: 91,
             ambience_password: password.to_string(),
+            ..Default::default()
         })
     }
 

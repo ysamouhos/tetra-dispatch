@@ -2,11 +2,12 @@
 //! commands/status and binary PCM16LE @ 8 kHz audio both ways.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{ConnectInfo, State};
+use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
@@ -21,6 +22,7 @@ use tracing::{info, warn};
 
 use crate::config::WebConfig;
 use crate::dispatcher::{ClientId, Event, UiCmd, UiOut};
+use crate::recording;
 
 const INDEX_HTML: &str = include_str!("../static/index.html");
 const LOG_HTML: &str = include_str!("../static/log.html");
@@ -33,14 +35,17 @@ struct AppState {
     ui: broadcast::Sender<UiOut>,
     password: Arc<String>,
     next_id: Arc<AtomicU64>,
+    recordings: Arc<PathBuf>,
 }
 
-pub async fn run(cfg: WebConfig, events: mpsc::Sender<Event>, ui: broadcast::Sender<UiOut>) -> anyhow::Result<()> {
-    let state = AppState { events, ui, password: Arc::new(cfg.password.clone()), next_id: Arc::new(AtomicU64::new(1)) };
+pub async fn run(cfg: WebConfig, recordings: PathBuf, events: mpsc::Sender<Event>, ui: broadcast::Sender<UiOut>) -> anyhow::Result<()> {
+    let state = AppState { events, ui, password: Arc::new(cfg.password.clone()), next_id: Arc::new(AtomicU64::new(1)), recordings: Arc::new(recordings) };
     let app = Router::new()
         .route("/", get(index))
         .route("/log", get(log_page))
         .route("/ws", get(ws_upgrade))
+        .route("/recordings", get(recordings_list))
+        .route("/recordings/{name}", get(recordings_file))
         .route("/healthz", get(|| async { "ok\n" }))
         .with_state(state);
     let listen = &cfg.listen;
@@ -101,6 +106,40 @@ async fn log_page(State(state): State<AppState>, headers: HeaderMap) -> Response
         return challenge();
     }
     ([(header::CACHE_CONTROL, "no-store")], Html(LOG_HTML)).into_response()
+}
+
+async fn recordings_list(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !authorized(&state, &headers) {
+        return challenge();
+    }
+    let dir = state.recordings.clone();
+    let entries = tokio::task::spawn_blocking(move || recording::list(&dir)).await.unwrap_or_default();
+    let body = serde_json::json!(entries.iter().map(|e| serde_json::json!({
+        "name": e.name, "bytes": e.bytes, "seconds": e.seconds(), "modified_ms": e.modified_ms,
+    })).collect::<Vec<_>>());
+    ([(header::CACHE_CONTROL, "no-store"), (header::CONTENT_TYPE, "application/json")], body.to_string()).into_response()
+}
+
+/// `?dl=1` asks the browser to save the file instead of playing it.
+async fn recordings_file(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return challenge();
+    }
+    let Some(path) = recording::path_of(&state.recordings, &name) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => {
+            let disp = if q.contains_key("dl") { format!("attachment; filename=\"{name}\"") } else { "inline".to_string() };
+            ([(header::CONTENT_TYPE, "audio/wav".to_string()), (header::CONTENT_DISPOSITION, disp)], bytes).into_response()
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn ws_upgrade(
@@ -193,6 +232,8 @@ fn parse_command(text: &str) -> Option<UiCmd> {
             period_s: v.get("period_s").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(0),
         },
         "locate_stop" => UiCmd::LocationStop { issi: ssi(&v, "issi") },
+        "rec_start" => UiCmd::RecordStart { name: v.get("name")?.as_str()?.to_string() },
+        "rec_stop" => UiCmd::RecordStop,
         "block" => UiCmd::Block { issi: ssi(&v, "issi"), block: v.get("block").and_then(Value::as_bool).unwrap_or(true) },
         _ => return None,
     })
@@ -211,6 +252,8 @@ mod tests {
         ));
         assert!(matches!(parse_command(r#"{"type":"sds","to":2001,"text":"hi"}"#), Some(UiCmd::Sds { dest: 2001, .. })));
         assert!(matches!(parse_command(r#"{"type":"block","issi":4013,"block":false}"#), Some(UiCmd::Block { issi: 4013, block: false })));
+        assert!(matches!(parse_command(r#"{"type":"rec_start","name":"a"}"#), Some(UiCmd::RecordStart { .. })));
+        assert!(matches!(parse_command(r#"{"type":"rec_stop"}"#), Some(UiCmd::RecordStop)));
         assert!(parse_command(r#"{"type":"nope"}"#).is_none());
         assert!(parse_command("not json").is_none());
     }
