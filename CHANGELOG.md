@@ -2,6 +2,20 @@
 
 All notable changes to Tetra Dispatch, newest first.
 
+## 1.3.0
+
+- **Voice recording.** A "Recordings" card records on the server (the
+  operator's traffic, written as mono 8 kHz WAV to `dispatch.recordings_dir`,
+  default `recordings/`) or on the browser's own device (received and
+  transmitted audio, saved as a download). Both ask for a file name; names
+  always start with `YYYYMMDD-HHMMSS`.
+- **Server recordings list.** Pick a recording from the list to play it in the
+  console, download it or delete it (delete needs the operator position).
+- **Recording activity log.** Recording start/stop and a recording being
+  played, downloaded or deleted are logged in the activity log and `/log`.
+- **Themed controls.** The console declares its colour scheme, so the player and
+  dropdowns follow the light/dark theme.
+
 ## 1.2.0
 
 - **Example config in `sample/`.** `tetra-dispatch.toml` moved to
