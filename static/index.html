@@ -40,6 +40,7 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 button.danger{background:var(--bad);border-color:var(--bad);color:#fff}
 button.ok{background:var(--ok);border-color:var(--ok);color:#fff}
 button.amb{background:#8b0000;border-color:#8b0000;color:#fff}
+a.btn{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--fg);text-decoration:none}
 button:disabled{opacity:.45;cursor:not-allowed}
 input,select{font:inherit;padding:7px 9px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg);min-width:0}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -402,9 +403,9 @@ async function refreshRecs(){
 function renderRecList(){
   const box=$('rec-list');
   if(!recFiles.length){box.innerHTML=`<span class="muted">${t('rec_none')}</span>`;return}
-  const opts=recFiles.map(e=>`<option value="${esc(e.name)}"${e.name===recSel?' selected':''}>${esc(e.name)} · ${esc(fmtSecs(e.seconds))} · ${esc((e.bytes/1048576).toFixed(1))} MB · ${esc(new Date(e.modified_ms).toLocaleString())}</option>`).join('');
-  box.innerHTML=`<div class="row"><select id="rec-sel" class="grow" aria-label="${esc(t('rec_title'))}">${opts}</select>`+
-    `<a id="rec-dl" href="#" download>${t('rec_dl')}</a>`+
+  const opts=recFiles.map(e=>`<option value="${esc(e.name)}"${e.name===recSel?' selected':''}>${esc(e.name)} · ${esc(fmtSecs(e.seconds))} · ${esc((e.bytes/1048576).toFixed(1))} MB</option>`).join('');
+  box.innerHTML=`<select id="rec-sel" style="width:100%" aria-label="${esc(t('rec_title'))}">${opts}</select>`+
+    `<div class="row" style="margin-top:8px"><a id="rec-dl" class="btn" href="#" download>${t('rec_dl')}</a>`+
     `<button id="rec-del">${t('rec_del')}</button></div>`+
     `<audio id="rec-audio" controls preload="none" style="width:100%;margin-top:8px"></audio>`;
   $('rec-sel').onchange=e=>{recSel=e.target.value;selRec(true)};
