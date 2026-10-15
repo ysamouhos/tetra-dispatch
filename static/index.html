@@ -18,6 +18,10 @@
 :root[data-theme="dark"]{--bg:#0f1318;--card:#171c23;--fg:#e4e8ee;--muted:#8b95a7;--line:#2a313b;
   --accent:#4c8dff;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--tx:#f85149;--rx:#3fb950;}
 *{box-sizing:border-box}
+:root{color-scheme:light}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){color-scheme:dark}}
+:root[data-theme="dark"]{color-scheme:dark}
+audio{width:100%;max-width:100%}
 #emergency{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#c62828;color:#fff;padding:10px 16px;font-weight:700;border-bottom:2px solid #ff8a80}
 #emergency.hidden{display:none}
 #emergency .edot{width:10px;height:10px;border-radius:50%;background:#fff;animation:ebreathe 1.6s ease-in-out infinite}
