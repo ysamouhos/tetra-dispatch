@@ -55,6 +55,8 @@ pub enum Event {
     Ui(ClientId, UiCmd),
     /// Microphone PCM16 @ 8 kHz from a console.
     UlPcm(ClientId, Vec<i16>),
+    /// A recording was played or downloaded over HTTP, from this address.
+    RecordingAccess { file: String, action: &'static str, from: String },
     Tick,
 }
 
@@ -81,6 +83,7 @@ pub enum UiCmd {
     /// Start a server-side recording; `name` is the user's file name.
     RecordStart { name: String },
     RecordStop,
+    RecordDelete { file: String },
 }
 
 #[derive(Debug, Clone)]
@@ -302,6 +305,9 @@ impl Dispatcher {
                 if self.owner == Some(id) {
                     self.on_ul_pcm(&pcm);
                 }
+            }
+            Event::RecordingAccess { file, action, from } => {
+                self.note("recording", json!({"event": action, "file": file, "by": from}));
             }
             Event::Tick => return self.on_tick(),
         }
@@ -835,8 +841,15 @@ impl Dispatcher {
             UiCmd::AmbienceListen { issi, password } => self.ambience_listen(id, issi, &password),
             UiCmd::Block { issi, block } => self.block_issi(issi, block),
             UiCmd::LocationRequest { issi, period_s } => self.request_location(issi, period_s),
-            UiCmd::RecordStart { name } => self.start_recording(&name),
+            UiCmd::RecordStart { name } => {
+                let by = self.clients.get(&id).cloned().unwrap_or_default();
+                self.start_recording(&name, &by);
+            }
             UiCmd::RecordStop => self.stop_recording(),
+            UiCmd::RecordDelete { file } => {
+                let by = self.clients.get(&id).cloned().unwrap_or_default();
+                self.delete_recording(&file, &by);
+            }
             UiCmd::LocationStop { issi } => {
                 self.polls.remove(&issi);
                 self.push_status();
@@ -845,7 +858,7 @@ impl Dispatcher {
         }
     }
 
-    fn start_recording(&mut self, name: &str) {
+    fn start_recording(&mut self, name: &str, by: &str) {
         if self.recorder.is_some() {
             return;
         }
@@ -856,6 +869,7 @@ impl Dispatcher {
         match Recorder::start(&self.cfg.recordings_dir, &stem) {
             Ok(r) => {
                 info!(file = r.file_name(), "recording started");
+                self.note("recording", json!({"event": "start", "file": r.file_name(), "by": by}));
                 self.recorder = Some((r, Instant::now()));
                 self.last_error = None;
             }
@@ -869,11 +883,38 @@ impl Dispatcher {
     fn stop_recording(&mut self) {
         if let Some((r, _)) = self.recorder.take() {
             match r.finish() {
-                Ok(f) => info!(file = f, "recording saved"),
+                Ok(f) => {
+                    info!(file = f, "recording saved");
+                    self.note("recording", json!({"event": "stop", "file": f}));
+                    self.recordings_changed();
+                }
                 Err(e) => {
                     warn!("recording: {e}");
                     self.last_error = Some(format!("recording: {e}"));
                 }
+            }
+        }
+    }
+
+    fn recordings_changed(&self) {
+        let _ = self.ui.send(UiOut::Text(json!({"type": "recordings_changed"}).to_string()));
+    }
+
+    fn delete_recording(&mut self, file: &str, by: &str) {
+        let active = self.recorder.as_ref().is_some_and(|(r, _)| r.file_name() == file);
+        let Some(path) = recording::path_of(&self.cfg.recordings_dir, file).filter(|_| !active) else {
+            self.last_error = Some("cannot delete this recording".into());
+            return;
+        };
+        match std::fs::remove_file(&path) {
+            Ok(()) => {
+                info!(file, "recording deleted");
+                self.note("recording", json!({"event": "delete", "file": file, "by": by}));
+                self.recordings_changed();
+            }
+            Err(e) => {
+                warn!("recording: {e}");
+                self.last_error = Some(format!("recording: {e}"));
             }
         }
     }

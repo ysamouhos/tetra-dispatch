@@ -123,6 +123,7 @@ async fn recordings_list(State(state): State<AppState>, headers: HeaderMap) -> R
 /// `?dl=1` asks the browser to save the file instead of playing it.
 async fn recordings_file(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
     Query(q): Query<std::collections::HashMap<String, String>>,
@@ -135,6 +136,8 @@ async fn recordings_file(
     };
     match tokio::fs::read(&path).await {
         Ok(bytes) => {
+            let action = if q.contains_key("dl") { "download" } else { "play" };
+            let _ = state.events.send(Event::RecordingAccess { file: name.clone(), action, from: addr.ip().to_string() }).await;
             let disp = if q.contains_key("dl") { format!("attachment; filename=\"{name}\"") } else { "inline".to_string() };
             ([(header::CONTENT_TYPE, "audio/wav".to_string()), (header::CONTENT_DISPOSITION, disp)], bytes).into_response()
         }
@@ -234,6 +237,7 @@ fn parse_command(text: &str) -> Option<UiCmd> {
         "locate_stop" => UiCmd::LocationStop { issi: ssi(&v, "issi") },
         "rec_start" => UiCmd::RecordStart { name: v.get("name")?.as_str()?.to_string() },
         "rec_stop" => UiCmd::RecordStop,
+        "rec_delete" => UiCmd::RecordDelete { file: v.get("file")?.as_str()?.to_string() },
         "block" => UiCmd::Block { issi: ssi(&v, "issi"), block: v.get("block").and_then(Value::as_bool).unwrap_or(true) },
         _ => return None,
     })
@@ -254,6 +258,7 @@ mod tests {
         assert!(matches!(parse_command(r#"{"type":"block","issi":4013,"block":false}"#), Some(UiCmd::Block { issi: 4013, block: false })));
         assert!(matches!(parse_command(r#"{"type":"rec_start","name":"a"}"#), Some(UiCmd::RecordStart { .. })));
         assert!(matches!(parse_command(r#"{"type":"rec_stop"}"#), Some(UiCmd::RecordStop)));
+        assert!(matches!(parse_command(r#"{"type":"rec_delete","file":"a.wav"}"#), Some(UiCmd::RecordDelete { .. })));
         assert!(parse_command(r#"{"type":"nope"}"#).is_none());
         assert!(parse_command("not json").is_none());
     }
