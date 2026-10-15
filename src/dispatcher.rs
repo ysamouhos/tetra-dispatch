@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::codec::Codec;
 use crate::config::{valid_ssi, DispatchConfig};
 use crate::protocol::*;
+use crate::recording::{self, Recorder};
 use crate::sds;
 
 pub type ClientId = u64;
@@ -54,6 +55,8 @@ pub enum Event {
     Ui(ClientId, UiCmd),
     /// Microphone PCM16 @ 8 kHz from a console.
     UlPcm(ClientId, Vec<i16>),
+    /// A recording was played or downloaded over HTTP, from this address.
+    RecordingAccess { file: String, action: &'static str, from: String },
     Tick,
 }
 
@@ -75,6 +78,12 @@ pub enum UiCmd {
     LocationRequest { issi: u32, period_s: u32 },
     /// Stop polling a radio's position.
     LocationStop { issi: u32 },
+    /// Block (or unblock) an ISSI on the connected brew-server's blacklist.
+    Block { issi: u32, block: bool },
+    /// Start a server-side recording; `name` is the user's file name.
+    RecordStart { name: String },
+    RecordStop,
+    RecordDelete { file: String },
 }
 
 #[derive(Debug, Clone)]
@@ -92,7 +101,13 @@ struct RxCall {
     source: u32,
     started: Instant,
     last: Instant,
+    /// Emergency call (priority 15). brew-server pushes these to every console,
+    /// whatever groups it listens to.
+    emergency: bool,
 }
+
+/// Call priority of an emergency call (ETSI EN 300 392-2 clause 14.8).
+const EMERGENCY_PRIORITY: u8 = 15;
 
 struct TxCall {
     uuid: Uuid,
@@ -183,7 +198,24 @@ pub struct Dispatcher {
     sds_ref: u8,
     /// SHORT_TRANSFER headers waiting for their SDS_TRANSFER frame.
     sds_pending: HashMap<Uuid, (u32, u32)>,
+    /// Emergencies brew-server last reported (ISSI → called group), and when. brew-server
+    /// re-sends the list every few seconds while any is active, so a list that goes quiet
+    /// (link trouble) expires after `ALARMS_STALE`.
+    alarms: BTreeMap<u32, Option<u32>>,
+    alarms_at: Option<Instant>,
+    /// brew-server's ISSI blacklist as last pushed, and whether this console may edit it.
+    blacklist: BTreeSet<u32>,
+    can_block: bool,
+    /// Server-side voice recording in progress, and when it began.
+    recorder: Option<(Recorder, Instant)>,
 }
+
+/// How long a list from brew-server stays valid without a refresh.
+const ALARMS_STALE: Duration = Duration::from_secs(15);
+/// `CLASS_SERVICE` type brew-server pushes: the active emergencies.
+const SERVICE_EMERGENCY: u8 = 0x11;
+/// `CLASS_SERVICE` type brew-server pushes: the ISSI blacklist (or a refused edit).
+const SERVICE_BLACKLIST: u8 = 0x13;
 
 fn epoch_ms() -> u64 {
     std::time::SystemTime::now()
@@ -231,6 +263,11 @@ impl Dispatcher {
             polls: HashMap::new(),
             sds_ref: 0,
             sds_pending: HashMap::new(),
+            alarms: BTreeMap::new(),
+            alarms_at: None,
+            blacklist: BTreeSet::new(),
+            can_block: false,
+            recorder: None,
         }
     }
 
@@ -268,6 +305,9 @@ impl Dispatcher {
                 if self.owner == Some(id) {
                     self.on_ul_pcm(&pcm);
                 }
+            }
+            Event::RecordingAccess { file, action, from } => {
+                self.note("recording", json!({"event": action, "file": file, "by": from}));
             }
             Event::Tick => return self.on_tick(),
         }
@@ -343,8 +383,76 @@ impl Dispatcher {
                 self.last_error = Some(format!("brew-server error {}", e.error_type));
             }
             BrewMessage::Subscriber(s) => debug!("brew: subscriber msg type={} issi={}", s.msg_type, s.number),
+            BrewMessage::Service(s) if s.service_type == SERVICE_EMERGENCY => self.on_emergencies(&s.json_data),
+            BrewMessage::Service(s) if s.service_type == SERVICE_BLACKLIST => self.on_blacklist(&s.json_data),
             BrewMessage::Service(s) => debug!("brew: service type={} {}", s.service_type, s.json_data),
         }
+    }
+
+    /// brew-server's list of active emergencies: `{"emergencies":[{"issi":N,"dest":G|null}]}`.
+    fn on_emergencies(&mut self, json: &str) {
+        let Ok(v) = serde_json::from_str::<Value>(json) else {
+            debug!("brew: malformed emergency list");
+            return;
+        };
+        let list: BTreeMap<u32, Option<u32>> = v["emergencies"].as_array().into_iter().flatten()
+            .filter_map(|e| Some((u32::try_from(e["issi"].as_u64()?).ok()?, e["dest"].as_u64().and_then(|d| u32::try_from(d).ok()))))
+            .collect();
+        let was_active = !self.alarms.is_empty();
+        for (issi, dest) in &list {
+            if !self.alarms.contains_key(issi) {
+                self.note("emergency", json!({"issi": issi, "gssi": dest}));
+            }
+        }
+        let changed = list != self.alarms;
+        self.alarms = list;
+        self.alarms_at = (!self.alarms.is_empty()).then(Instant::now);
+        if changed || was_active != !self.alarms.is_empty() {
+            self.push_status();
+        }
+    }
+
+    /// brew-server's blacklist: `{"blacklist":[N,...],"can_edit":bool}`, or
+    /// `{"error":"..."}` when it refused an edit.
+    fn on_blacklist(&mut self, json: &str) {
+        let Ok(v) = serde_json::from_str::<Value>(json) else {
+            debug!("brew: malformed blacklist message");
+            return;
+        };
+        if let Some(e) = v["error"].as_str() {
+            warn!("brew-server refused a blacklist edit: {e}");
+            self.last_error = Some(format!("brew-server: {e}"));
+            self.push_status();
+            return;
+        }
+        let list: BTreeSet<u32> = v["blacklist"].as_array().into_iter().flatten()
+            .filter_map(|i| i.as_u64().and_then(|i| u32::try_from(i).ok())).collect();
+        let can = v["can_edit"].as_bool().unwrap_or(false);
+        if list != self.blacklist || can != self.can_block {
+            self.blacklist = list;
+            self.can_block = can;
+            self.push_status();
+        }
+    }
+
+    /// Ask brew-server to block or unblock an ISSI. It decides whether this
+    /// console may (`[blacklist] console_users`) and answers with the new list.
+    fn block_issi(&mut self, issi: u32, block: bool) {
+        if !valid_ssi(issi) {
+            self.last_error = Some("invalid ISSI".into());
+            return;
+        }
+        if self.link.is_none() {
+            self.last_error = Some("not connected to brew-server".into());
+            return;
+        }
+        if !self.can_block {
+            self.last_error = Some("this console may not edit the blacklist on this brew-server".into());
+            return;
+        }
+        let json = json!({"action": if block { "block" } else { "unblock" }, "issi": issi}).to_string();
+        self.send(build_service(BREW_SERVICE_BLACKLIST_CMD, &json));
+        self.note("block", json!({"issi": issi, "block": block}));
     }
 
     fn on_call_control(&mut self, cc: BrewCallControlMessage) {
@@ -416,21 +524,28 @@ impl Dispatcher {
         if self.tx.as_ref().is_some_and(|t| t.uuid == uuid) {
             return;
         }
-        if !self.affiliated.contains(&gt.destination) {
-            // brew-server may broadcast unaffiliated groups (fallback routing).
+        let emergency = gt.priority >= EMERGENCY_PRIORITY;
+        if !self.affiliated.contains(&gt.destination) && !emergency {
+            // brew-server may broadcast unaffiliated groups (fallback routing). An emergency
+            // call is always taken: brew-server pushes it to every console.
             return;
         }
         let now = Instant::now();
         let fresh = !self.rx.contains_key(&uuid);
-        let call = self.rx.entry(uuid).or_insert(RxCall { gssi: gt.destination, source: gt.source, started: now, last: now });
+        let call = self.rx.entry(uuid).or_insert(RxCall { gssi: gt.destination, source: gt.source, started: now, last: now, emergency });
+        call.emergency |= emergency;
         // A GROUP_TX on a running call is a talker change.
         let talker_changed = call.source != gt.source;
         call.source = gt.source;
         call.last = now;
         if fresh || talker_changed {
-            self.note("group_rx", json!({"gssi": gt.destination, "source": gt.source}));
+            self.note("group_rx", json!({"gssi": gt.destination, "source": gt.source, "emergency": emergency}));
         }
-        if self.playing.is_none() && self.private.is_none() {
+        // An emergency call takes the speaker over from an ordinary group call (not from a
+        // private call in progress, nor from another emergency call already playing).
+        let playing_emergency = self.playing.and_then(|u| self.rx.get(&u)).is_some_and(|c| c.emergency);
+        let takes_over = emergency && self.private.is_none() && !playing_emergency && self.playing != Some(uuid);
+        if (self.playing.is_none() && self.private.is_none()) || takes_over {
             self.playing = Some(uuid);
             self.codec.reset();
         }
@@ -483,6 +598,7 @@ impl Dispatcher {
         };
         let Some(owner) = self.owner.filter(|_| audible) else { return };
         if let Some(pcm) = self.codec.decode_ste(data) {
+            self.record(&pcm);
             let bytes = pcm.iter().flat_map(|s| s.to_le_bytes()).collect();
             let _ = self.ui.send(UiOut::Pcm(owner, bytes));
         }
@@ -723,7 +839,17 @@ impl Dispatcher {
             UiCmd::Hangup => self.hangup(),
             UiCmd::Sds { dest, text } => self.send_text(dest, text),
             UiCmd::AmbienceListen { issi, password } => self.ambience_listen(id, issi, &password),
+            UiCmd::Block { issi, block } => self.block_issi(issi, block),
             UiCmd::LocationRequest { issi, period_s } => self.request_location(issi, period_s),
+            UiCmd::RecordStart { name } => {
+                let by = self.clients.get(&id).cloned().unwrap_or_default();
+                self.start_recording(&name, &by);
+            }
+            UiCmd::RecordStop => self.stop_recording(),
+            UiCmd::RecordDelete { file } => {
+                let by = self.clients.get(&id).cloned().unwrap_or_default();
+                self.delete_recording(&file, &by);
+            }
             UiCmd::LocationStop { issi } => {
                 self.polls.remove(&issi);
                 self.push_status();
@@ -732,7 +858,79 @@ impl Dispatcher {
         }
     }
 
+    fn start_recording(&mut self, name: &str, by: &str) {
+        if self.recorder.is_some() {
+            return;
+        }
+        let Some(stem) = recording::sanitize(name) else {
+            self.last_error = Some("invalid recording name".into());
+            return;
+        };
+        match Recorder::start(&self.cfg.recordings_dir, &stem) {
+            Ok(r) => {
+                info!(file = r.file_name(), "recording started");
+                self.note("recording", json!({"event": "start", "file": r.file_name(), "by": by}));
+                self.recorder = Some((r, Instant::now()));
+                self.last_error = None;
+            }
+            Err(e) => {
+                warn!("recording: {e}");
+                self.last_error = Some(format!("recording: {e}"));
+            }
+        }
+    }
+
+    fn stop_recording(&mut self) {
+        if let Some((r, _)) = self.recorder.take() {
+            match r.finish() {
+                Ok(f) => {
+                    info!(file = f, "recording saved");
+                    self.note("recording", json!({"event": "stop", "file": f}));
+                    self.recordings_changed();
+                }
+                Err(e) => {
+                    warn!("recording: {e}");
+                    self.last_error = Some(format!("recording: {e}"));
+                }
+            }
+        }
+    }
+
+    fn recordings_changed(&self) {
+        let _ = self.ui.send(UiOut::Text(json!({"type": "recordings_changed"}).to_string()));
+    }
+
+    fn delete_recording(&mut self, file: &str, by: &str) {
+        let active = self.recorder.as_ref().is_some_and(|(r, _)| r.file_name() == file);
+        let Some(path) = recording::path_of(&self.cfg.recordings_dir, file).filter(|_| !active) else {
+            self.last_error = Some("cannot delete this recording".into());
+            return;
+        };
+        match std::fs::remove_file(&path) {
+            Ok(()) => {
+                info!(file, "recording deleted");
+                self.note("recording", json!({"event": "delete", "file": file, "by": by}));
+                self.recordings_changed();
+            }
+            Err(e) => {
+                warn!("recording: {e}");
+                self.last_error = Some(format!("recording: {e}"));
+            }
+        }
+    }
+
+    fn record(&mut self, pcm: &[i16]) {
+        if let Some((r, _)) = self.recorder.as_mut() {
+            if let Err(e) = r.write(pcm) {
+                warn!("recording: {e}");
+                self.last_error = Some(format!("recording: {e}"));
+                self.stop_recording();
+            }
+        }
+    }
+
     fn release_position(&mut self) {
+        self.stop_recording();
         self.set_ptt(false);
         self.hangup();
         self.owner = None;
@@ -819,6 +1017,7 @@ impl Dispatcher {
             (None, Some(t)) => t.uuid,
             (None, None) => return,
         };
+        self.record(pcm);
         for block in self.codec.encode_pcm(pcm) {
             self.send(build_voice_frame(&uuid, (block.len() * 8) as u16, &block));
         }
@@ -908,6 +1107,11 @@ impl Dispatcher {
             self.preempt_until = None;
             changed = true;
         }
+        if self.alarms_at.is_some_and(|t| t.elapsed() > ALARMS_STALE) {
+            self.alarms.clear();
+            self.alarms_at = None;
+            changed = true;
+        }
         // Re-send location requests that have come due.
         let due: Vec<u32> = self.polls.iter().filter(|(_, (_, next))| now >= *next).map(|(&i, _)| i).collect();
         for issi in due {
@@ -923,7 +1127,14 @@ impl Dispatcher {
 
     fn status(&self) -> Value {
         let rx = self.playing.and_then(|u| self.rx.get(&u)).map(|c| json!({"gssi": c.gssi, "source": c.source}));
-        let active: Vec<Value> = self.rx.values().map(|c| json!({"gssi": c.gssi, "source": c.source})).collect();
+        let active: Vec<Value> = self.rx.values().map(|c| json!({"gssi": c.gssi, "source": c.source, "emergency": c.emergency})).collect();
+        // Every emergency the console knows: calls it hears at priority 15 and the list
+        // brew-server pushes (alarms, and calls on groups relayed from other servers).
+        let mut emergencies: BTreeMap<u32, Option<u32>> = self.alarms.clone();
+        for c in self.rx.values().filter(|c| c.emergency) {
+            emergencies.insert(c.source, Some(c.gssi));
+        }
+        let emergencies: Vec<Value> = emergencies.iter().map(|(&issi, &gssi)| json!({"issi": issi, "gssi": gssi})).collect();
         let private = if let Some(p) = &self.private {
             json!({
                 "peer": p.peer, "duplex": p.duplex, "inbound": p.inbound, "phase": p.phase.name(),
@@ -949,6 +1160,10 @@ impl Dispatcher {
             "preempt_offer": self.preempt_until.is_some(),
             "rx": rx,
             "active": active,
+            "emergencies": emergencies,
+            "blacklist": self.blacklist,
+            "can_block": self.can_block,
+            "recording": self.recorder.as_ref().map(|(r, at)| json!({"file": r.file_name(), "started_ms": epoch_ms_at(*at)})),
             "private": private,
             "polls": self.polls.iter().map(|(&i, (p, _))| json!({"issi": i, "period_s": p.as_secs()})).collect::<Vec<_>>(),
             "operator": self.owner.and_then(|id| self.clients.get(&id)),
@@ -974,7 +1189,7 @@ mod tests {
     const OP: u32 = 9_990_001;
 
     fn setup() -> (Dispatcher, broadcast::Receiver<UiOut>, mpsc::Receiver<Vec<u8>>) {
-        setup_with(DispatchConfig { operator_issi: OP, groups: vec![91, 92], tx_group: 91, priority: 0, ambience_password: String::new() })
+        setup_with(DispatchConfig { operator_issi: OP, groups: vec![91, 92], tx_group: 91, priority: 0, ambience_password: String::new(), ..Default::default() })
     }
 
     fn setup_with(cfg: DispatchConfig) -> (Dispatcher, broadcast::Receiver<UiOut>, mpsc::Receiver<Vec<u8>>) {
@@ -1046,6 +1261,98 @@ mod tests {
         assert!(call_states(&drain(&mut rx)).is_empty());
         d.handle(Event::Ui(1, UiCmd::Ptt { down: true }));
         assert_eq!(call_states(&drain(&mut rx)), vec![CALL_STATE_GROUP_TX]);
+    }
+
+    #[test]
+    fn emergency_group_call_is_taken_even_when_not_listened_to_and_takes_the_speaker() {
+        let (mut d, mut ui, _rx) = setup();
+        // Group 99 is not listened to: an ordinary call there is ignored ...
+        let normal = Uuid::new_v4();
+        d.handle(Event::Brew(build_group_tx(&normal, 1234, 99, 0, 0, None)));
+        assert!(d.status()["active"].as_array().unwrap().is_empty());
+        // ... but an emergency call there is taken, flagged, and played.
+        let em = Uuid::new_v4();
+        d.handle(Event::Brew(build_group_tx(&em, 4013, 99, EMERGENCY_PRIORITY, 0, None)));
+        let st = d.status();
+        assert_eq!(st["active"][0]["emergency"], true);
+        assert_eq!(st["rx"]["gssi"], 99);
+        d.handle(Event::Brew(build_voice_frame(&em, 288, &[0u8; 36])));
+        assert!(std::iter::from_fn(|| ui.try_recv().ok()).any(|m| matches!(m, UiOut::Pcm(1, _))));
+        // It takes the speaker over from an ordinary call already playing.
+        d.handle(Event::Brew(build_group_idle(&em, 0)));
+        let ordinary = Uuid::new_v4();
+        d.handle(Event::Brew(build_group_tx(&ordinary, 1234, 92, 0, 0, None)));
+        assert_eq!(d.status()["rx"]["gssi"], 92);
+        let em2 = Uuid::new_v4();
+        d.handle(Event::Brew(build_group_tx(&em2, 4013, 91, EMERGENCY_PRIORITY, 0, None)));
+        assert_eq!(d.status()["rx"]["gssi"], 91);
+        d.handle(Event::Brew(build_group_idle(&em2, 0)));
+        assert!(d.status()["active"].as_array().unwrap().iter().all(|a| a["emergency"] == false));
+    }
+
+    fn service(t: u8, json: &str) -> Vec<u8> {
+        let mut m = vec![0xf4, t];
+        m.extend_from_slice(json.as_bytes());
+        m.push(0);
+        m
+    }
+
+    fn raw(rx: &mut mpsc::Receiver<Vec<u8>>) -> Vec<Vec<u8>> {
+        std::iter::from_fn(|| rx.try_recv().ok()).collect()
+    }
+
+    #[test]
+    fn the_operator_can_block_an_issi_when_brew_server_allows_it() {
+        let (mut d, _ui, mut rx) = setup();
+        d.handle(Event::Brew(service(0x13, r#"{"blacklist":[7],"can_edit":false}"#)));
+        assert_eq!(d.status()["blacklist"], json!([7]));
+        assert_eq!(d.status()["can_block"], false);
+        // Not allowed here: nothing is sent, the operator is told.
+        d.handle(Event::Ui(1, UiCmd::Block { issi: 4013, block: true }));
+        assert!(raw(&mut rx).iter().all(|m| m.get(..2) != Some(&[0xf4, 0x12][..])));
+        assert!(d.status()["last_error"].as_str().unwrap().contains("may not edit"));
+
+        d.handle(Event::Brew(service(0x13, r#"{"blacklist":[7],"can_edit":true}"#)));
+        assert_eq!(d.status()["can_block"], true);
+        d.handle(Event::Ui(1, UiCmd::Block { issi: 4013, block: true }));
+        let sent: Vec<Vec<u8>> = raw(&mut rx).into_iter().filter(|m| m.get(..2) == Some(&[0xf4, 0x12][..])).collect();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(&sent[0][2..sent[0].len() - 1], br#"{"action":"block","issi":4013}"#);
+        d.handle(Event::Ui(1, UiCmd::Block { issi: 4013, block: false }));
+        let sent: Vec<Vec<u8>> = raw(&mut rx).into_iter().filter(|m| m.get(..2) == Some(&[0xf4, 0x12][..])).collect();
+        assert_eq!(&sent[0][2..sent[0].len() - 1], br#"{"action":"unblock","issi":4013}"#);
+        // brew-server's refusal is shown.
+        d.handle(Event::Brew(service(0x13, r#"{"error":"not authorised to edit the blacklist"}"#)));
+        assert!(d.status()["last_error"].as_str().unwrap().contains("not authorised"));
+        // Only the operator can send it.
+        d.handle(Event::Ui(2, UiCmd::Block { issi: 5, block: true }));
+        assert!(raw(&mut rx).iter().all(|m| m.get(..2) != Some(&[0xf4, 0x12][..])));
+    }
+
+    #[test]
+    fn brew_servers_emergency_list_is_shown_and_expires() {
+        let (mut d, _ui, _rx) = setup();
+        let msg = |json: &str| {
+            let mut m = vec![0xf4, 0x11];
+            m.extend_from_slice(json.as_bytes());
+            m.push(0);
+            m
+        };
+        d.handle(Event::Brew(msg(r#"{"emergencies":[{"issi":4013,"dest":91},{"issi":4020,"dest":null}]}"#)));
+        let e = d.status()["emergencies"].clone();
+        assert_eq!(e, json!([{"issi": 4013, "gssi": 91}, {"issi": 4020, "gssi": null}]));
+        // A call heard at priority 15 is listed too, merged by ISSI.
+        let em = Uuid::new_v4();
+        d.handle(Event::Brew(build_group_tx(&em, 4020, 99, EMERGENCY_PRIORITY, 0, None)));
+        assert_eq!(d.status()["emergencies"][1], json!({"issi": 4020, "gssi": 99}));
+        // An empty list clears the alarms; stale ones expire on their own.
+        d.handle(Event::Brew(msg(r#"{"emergencies":[]}"#)));
+        assert_eq!(d.status()["emergencies"], json!([{"issi": 4020, "gssi": 99}]), "only the live call remains");
+        d.handle(Event::Brew(msg(r#"{"emergencies":[{"issi":4013,"dest":null}]}"#)));
+        d.alarms_at = Some(Instant::now() - ALARMS_STALE - Duration::from_secs(1));
+        d.on_tick();
+        assert!(d.alarms.is_empty());
+        d.handle(Event::Brew(msg("not json")));
     }
 
     #[test]
@@ -1175,8 +1482,9 @@ mod tests {
 
     fn setup_al(password: &str) -> (Dispatcher, broadcast::Receiver<UiOut>, mpsc::Receiver<Vec<u8>>) {
         setup_with(DispatchConfig {
-            operator_issi: OP, groups: vec![91, 92], tx_group: 91, priority: 0,
+            operator_issi: OP, groups: vec![91, 92], tx_group: 91,
             ambience_password: password.to_string(),
+            ..Default::default()
         })
     }
 

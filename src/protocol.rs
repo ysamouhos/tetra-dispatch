@@ -766,6 +766,19 @@ pub fn build_service_rssi(issi: u32, rssi_dbfs: f32) -> Vec<u8> {
     buf
 }
 
+/// Service type a console sends to edit brew-server's ISSI blacklist.
+pub const BREW_SERVICE_BLACKLIST_CMD: u8 = 0x12;
+
+/// Build a Service (0xf4) message: class, type, NUL-terminated JSON.
+pub fn build_service(service_type: u8, json: &str) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(3 + json.len());
+    buf.push(BREW_CLASS_SERVICE);
+    buf.push(service_type);
+    buf.extend_from_slice(json.as_bytes());
+    buf.push(0);
+    buf
+}
+
 /// Build a query subscribers service message
 pub fn build_query_subscribers(issis: &[u32]) -> Vec<u8> {
     let json = serde_json::to_string(issis).unwrap_or_else(|_| "[]".to_string());

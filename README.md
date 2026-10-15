@@ -22,6 +22,11 @@ stays where it is, for cell-local dispatch without a Brew network.
 - **Private calls**: you can make and answer duplex or simplex calls to any
   ISSI the brew-server can reach.
 - **SDS**: sends and receives text messages (SDS-TL, protocol 0x82).
+- **Voice recording**: records on the server (the operator's traffic, saved
+  as WAV in `[dispatch] recordings_dir`) or on the browser's device. Both ask
+  for a file name, which always starts with `YYYYMMDD-HHMMSS`. Server
+  recordings are listed in the console to play, download or delete, and
+  recording start/stop, play, download and delete go to the activity log.
 - **HTTPS console**: optional built-in TLS (`[web] tls`), so browsers allow the
   microphone without a reverse proxy.
 - **One operator at a time**: one browser takes the operator position. Other
@@ -37,7 +42,7 @@ You need a Rust toolchain and a C compiler.
 
 ```bash
 cargo build --release
-./target/release/tetra-dispatch tetra-dispatch.toml
+./target/release/tetra-dispatch sample/tetra-dispatch.toml   # the example; copy and edit it for your own
 ```
 
 Then open `http://<host>:8443/` (or `https://` with `tls = true`). The console
@@ -84,9 +89,10 @@ and `tls_pinned_cert_path` to a copy of its `server.crt`.
 | `src/dispatcher.rs` | Registration, affiliations, group/private calls, SDS, operator position |
 | `src/codec.rs` | PCM ↔ ACELP and the 36-byte STE traffic payload |
 | `src/sds.rs` | SDS text encode/decode |
-| `src/web.rs` | Console HTTP and WebSocket (JSON commands, binary PCM) |
+| `src/recording.rs` | Server-side WAV recordings: file names, writer, listing |
+| `src/web.rs` | Console HTTP and WebSocket (JSON commands, binary PCM), recordings download |
 | `static/index.html` | The console (ES/EN, light/dark) |
-| `tetra-dispatch.toml` | Example configuration |
+| `sample/tetra-dispatch.toml` | Example configuration |
 
 ```bash
 cargo test

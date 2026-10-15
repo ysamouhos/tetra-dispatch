@@ -2,6 +2,43 @@
 
 All notable changes to Tetra Dispatch, newest first.
 
+## 1.3.0
+
+- **Voice recording.** A "Recordings" card records on the server (the
+  operator's traffic, written as mono 8 kHz WAV to `dispatch.recordings_dir`,
+  default `recordings/`) or on the browser's own device (received and
+  transmitted audio, saved as a download). Both ask for a file name; names
+  always start with `YYYYMMDD-HHMMSS`.
+- **Server recordings list.** Pick a recording from the list to play it in the
+  console, download it or delete it (delete needs the operator position).
+- **Recording activity log.** Recording start/stop and a recording being
+  played, downloaded or deleted are logged in the activity log and `/log`.
+- **Themed controls.** The console declares its colour scheme, so the player and
+  dropdowns follow the light/dark theme.
+
+## 1.2.0
+
+- **Example config in `sample/`.** `tetra-dispatch.toml` moved to
+  `sample/tetra-dispatch.toml`; run `tetra-dispatch sample/tetra-dispatch.toml`
+  or your own copy.
+- **Block ISSIs from the console.** A "Blocked ISSIs" card (and a Block button in
+  a radio's map popup) lets the operator block and unblock ISSIs on the connected
+  brew-server. brew-server decides whether this console may
+  (`[blacklist] console_users`); otherwise the card is view-only and says so.
+  The list shown follows brew-server's. Needs brew-server 1.16.2 or later.
+- **Emergency list from brew-server.** The red ribbon now also covers an
+  emergency alarm with no call running, from the list brew-server pushes
+  (service message `0x11`); it merges with the emergency calls the console
+  hears. The list expires after 15 s without a refresh.
+- **Red radio on the map.** A radio in an emergency is drawn red and pulsing
+  with an EMERGENCY popup; an emergency radio with no position yet is named in
+  the map line.
+- **Emergency calls.** An emergency group call (priority 15) is now taken and
+  played even when the console is not listening to that group, takes the
+  speaker over from an ordinary group call, and shows a red "EMERGENCY ACTIVE"
+  ribbon with the calling ISSI and group while it lasts. Needs a brew-server
+  that pushes emergency calls to consoles (brew-server 1.16.2 or later).
+
 ## 1.0.0
 
 First release. Tetra Dispatch is a browser dispatch console that connects

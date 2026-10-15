@@ -18,6 +18,17 @@
 :root[data-theme="dark"]{--bg:#0f1318;--card:#171c23;--fg:#e4e8ee;--muted:#8b95a7;--line:#2a313b;
   --accent:#4c8dff;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--tx:#f85149;--rx:#3fb950;}
 *{box-sizing:border-box}
+:root{color-scheme:light}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){color-scheme:dark}}
+:root[data-theme="dark"]{color-scheme:dark}
+audio{width:100%;max-width:100%}
+select{text-overflow:ellipsis;white-space:nowrap}
+input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+#emergency{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#c62828;color:#fff;padding:10px 16px;font-weight:700;border-bottom:2px solid #ff8a80}
+#emergency.hidden{display:none}
+#emergency .edot{width:10px;height:10px;border-radius:50%;background:#fff;animation:ebreathe 1.6s ease-in-out infinite}
+#emergency .echip{background:rgba(255,255,255,.2);border-radius:4px;padding:2px 8px;font-weight:600;font-size:13px}
+@keyframes ebreathe{50%{opacity:.3}}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}
 header h1{font-size:17px;margin:0;font-weight:650}
@@ -35,6 +46,7 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 button.danger{background:var(--bad);border-color:var(--bad);color:#fff}
 button.ok{background:var(--ok);border-color:var(--ok);color:#fff}
 button.amb{background:#8b0000;border-color:#8b0000;color:#fff}
+a.btn{font:inherit;padding:7px 14px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--fg);text-decoration:none}
 button:disabled{opacity:.45;cursor:not-allowed}
 input,select{font:inherit;padding:7px 9px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg);min-width:0}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -62,6 +74,8 @@ th{color:var(--muted);font-weight:500}
 #map{height:420px;border-radius:8px;border:1px solid var(--line);background:var(--bg)}
 .radio-icon{background:none;border:0;color:var(--accent);filter:drop-shadow(0 1px 1px rgba(0,0,0,.45))}
 .radio-icon.talking{color:var(--tx)}
+.radio-icon.emergency{color:#e53935;animation:emap 1.2s ease-in-out infinite}
+@keyframes emap{0%,100%{filter:drop-shadow(0 0 0 rgba(229,57,53,.9))}50%{filter:drop-shadow(0 0 9px rgba(229,57,53,1))}}
 .radio-icon svg{display:block;width:100%;height:100%}
 .leaflet-tooltip.talk{background:var(--tx);color:#fff;border-color:var(--tx);font-weight:650}
 .leaflet-tooltip.talk::before{border-top-color:var(--tx)}
@@ -75,6 +89,7 @@ th{color:var(--muted);font-weight:500}
 </style>
 </head>
 <body>
+<div id="emergency" class="hidden" role="alert"><span class="edot"></span><span data-t="emergency"></span><span id="emergency-list" style="display:flex;flex-wrap:wrap;gap:8px"></span></div>
 <header>
   <h1>Tetra Dispatch</h1>
   <span id="link" class="pill off"><span class="dot"></span><span id="link-text"></span></span>
@@ -134,6 +149,29 @@ th{color:var(--muted);font-weight:500}
     <div class="row muted" id="polls" style="margin-top:6px"></div>
   </section>
 
+  <section class="card">
+    <h2 data-t="blocked"></h2>
+    <div class="row muted" data-t="block_hint"></div>
+    <div class="row">
+      <input id="blk-issi" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI" style="width:100px">
+      <button id="blk-add" class="danger" data-t="block"></button>
+    </div>
+    <div class="row muted" id="blk-state" style="margin-top:6px"></div>
+    <div id="blk-list" style="margin-top:6px"></div>
+  </section>
+
+  <section class="card">
+    <h2 data-t="rec_title"></h2>
+    <div class="row">
+      <button id="rec-server" class="danger" data-t="rec_server"></button>
+      <button id="rec-client" data-t="rec_client"></button>
+      <span id="rec-state" class="muted"></span>
+      <span class="grow"></span>
+      <button id="rec-refresh" data-t="rec_refresh"></button>
+    </div>
+    <div id="rec-list" class="list" style="margin-top:8px"></div>
+  </section>
+
   <section class="card span2">
     <h2 data-t="map"></h2>
     <div id="map"></div>
@@ -176,6 +214,16 @@ th{color:var(--muted);font-weight:500}
     </div>
   </div>
 </div>
+<div id="rec-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="rec-title">
+  <div class="box">
+    <h3 id="rec-title" data-t="rec_name_title"></h3>
+    <input id="rec-name" type="text" maxlength="64" autocomplete="off" data-tp="rec_name">
+    <div class="row">
+      <button id="rec-cancel" data-t="cancel"></button>
+      <button id="rec-ok" class="primary" data-t="rec_ok"></button>
+    </div>
+  </div>
+</div>
 <script>
 'use strict';
 const LANGS={
@@ -189,10 +237,11 @@ const LANGS={
     answering:'Connecting…',connected_call:'Connected',ended:'Call ended',failed:'Call failed',duplex:'duplex',simplex:'simplex',
     remove:'Remove',active:'Active: ',preempt:'Busy — press again to transmit over it',mic_fail:'Microphone unavailable: ',
     insecure:'The microphone needs https:// or localhost. Open the console through a TLS proxy.',
-    group_rx:'Group call',group_tx:'Dispatcher transmitted',loc_req_once:'Location requested',loc_req_poll:'Location polling started',loc_req_stop:'Location polling stopped',link_up:'Brew link up',link_down:'Brew link down',
+    group_rx:'Group call',no_position:'no position',emergency:'EMERGENCY ACTIVE',emerg_call:'emergency call',group_tx:'Dispatcher transmitted',loc_req_once:'Location requested',loc_req_poll:'Location polling started',loc_req_stop:'Location polling stopped',link_up:'Brew link up',link_down:'Brew link down',
     priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
-    delivered:'delivered',logs:'Logs',ambience:'Ambient listen',amb_hint:'Open a listening call to the radio. The radio shows the call — this is not covert. The brew-server only relays the call, so it works only if the radio/basestation supports ambience listening.',ambience_call:'Ambient Listen Call',locate:'Locate',loc_once:'Locate once',loc_every:'every',seconds:'s',loc_poll:'Start polling',loc_stop:'Stop',polling:'Polling: ',listen_only:'Listening (radio talks)',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
-    al_auth_title:'Authorize ambient listen',al_auth_msg:'Ambient listen needs authorization. Enter the password to open a listening call.',al_auth_label:'Authorization password',cancel:'Cancel',al_denied:'Ambient-listen authorization failed',
+    delivered:'delivered',blocked:'Blocked ISSIs',block:'Block',unblock:'Unblock',block_none:'No ISSI is blocked',block_na:'This console may not edit the blacklist on this brew-server',block_hint:'A blocked radio cannot call, send SDS or transmit through the brew-server. Emergency calls, ambient listen and location requests still work.',block_log:'Blocked',unblock_log:'Unblocked',logs:'Logs',ambience:'Ambient listen',amb_hint:'Open a listening call to the radio. The radio shows the call — this is not covert. The brew-server only relays the call, so it works only if the radio/basestation supports ambience listening.',ambience_call:'Ambient Listen Call',locate:'Locate',loc_once:'Locate once',loc_every:'every',seconds:'s',loc_poll:'Start polling',loc_stop:'Stop',polling:'Polling: ',listen_only:'Listening (radio talks)',map:'Map',radios:'Radios on map: ',talking_nopos:'Talking without position: ',no_map:'Map unavailable (no internet access for map library)',
+    al_auth_title:'Authorize ambient listen',al_auth_msg:'Ambient listen needs authorization. Enter the password to open a listening call.',al_auth_label:'Authorization password',cancel:'Cancel',rec_title:'Recordings',rec_log:'Recording',rec_ev_start:'started',rec_ev_stop:'stopped',rec_ev_play:'played',rec_ev_download:'downloaded',rec_ev_delete:'deleted',rec_del:'Delete',rec_del_q:'Delete this recording from the server?',rec_server:'Record on server',rec_client:'Record on this device',rec_stop:'Stop',rec_refresh:'Refresh',
+    rec_name_title:'Recording name',rec_name:'File name',rec_ok:'Save',rec_on:'Recording on server: ',rec_local:'Recording on this device…',rec_none:'No recordings',rec_dl:'Download',rec_need_op:'Take the position to record on the server',al_denied:'Ambient-listen authorization failed',
     amb_log:'Ambient listen',amb_started:'started',amb_denied:'authorization denied',
     causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
       7:'incompatible',8:'service not supported',9:'pre-empted',10:'invalid identity',11:'SwMI disconnect',12:'no idle cc',
@@ -207,10 +256,11 @@ const LANGS={
     answering:'Conectando…',connected_call:'Conectada',ended:'Llamada finalizada',failed:'Llamada fallida',duplex:'dúplex',simplex:'símplex',
     remove:'Quitar',active:'Activos: ',preempt:'Ocupado — pulsa otra vez para transmitir encima',mic_fail:'Micrófono no disponible: ',
     insecure:'El micrófono necesita https:// o localhost. Abre la consola a través de un proxy TLS.',
-    group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',loc_req_once:'Localización solicitada',loc_req_poll:'Sondeo de localización iniciado',loc_req_stop:'Sondeo de localización detenido',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
+    group_rx:'Llamada de grupo',no_position:'sin posición',emergency:'EMERGENCIA ACTIVA',emerg_call:'llamada de emergencia',group_tx:'Transmitió el despacho',loc_req_once:'Localización solicitada',loc_req_poll:'Sondeo de localización iniciado',loc_req_stop:'Sondeo de localización detenido',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
     priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
-    delivered:'entregado',logs:'Registros',ambience:'Escucha ambiente',amb_hint:'Abre una llamada de escucha a la radio. La radio muestra la llamada — no es encubierto. El brew-server solo reenvía la llamada, así que funciona solo si la radio/estación base admite escucha ambiente.',ambience_call:'Llamada de escucha ambiente',locate:'Localización',loc_once:'Localizar',loc_every:'cada',seconds:'s',loc_poll:'Sondear',loc_stop:'Parar',polling:'Sondeando: ',listen_only:'Escuchando (habla la radio)',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
-    al_auth_title:'Autorizar escucha ambiente',al_auth_msg:'La escucha ambiente requiere autorización. Introduce la contraseña para abrir la llamada de escucha.',al_auth_label:'Contraseña de autorización',cancel:'Cancelar',al_denied:'Autorización de escucha ambiente fallida',
+    delivered:'entregado',blocked:'ISSI bloqueados',block:'Bloquear',unblock:'Desbloquear',block_none:'Ningún ISSI bloqueado',block_na:'Esta consola no puede editar la lista negra de este brew-server',block_hint:'Una radio bloqueada no puede llamar, enviar SDS ni transmitir por el brew-server. Las llamadas de emergencia, la escucha ambiente y las peticiones de localización siguen funcionando.',block_log:'Bloqueado',unblock_log:'Desbloqueado',logs:'Registros',ambience:'Escucha ambiente',amb_hint:'Abre una llamada de escucha a la radio. La radio muestra la llamada — no es encubierto. El brew-server solo reenvía la llamada, así que funciona solo si la radio/estación base admite escucha ambiente.',ambience_call:'Llamada de escucha ambiente',locate:'Localización',loc_once:'Localizar',loc_every:'cada',seconds:'s',loc_poll:'Sondear',loc_stop:'Parar',polling:'Sondeando: ',listen_only:'Escuchando (habla la radio)',map:'Mapa',radios:'Radios en el mapa: ',talking_nopos:'Hablando sin posición: ',no_map:'Mapa no disponible (sin acceso a internet para la librería)',
+    al_auth_title:'Autorizar escucha ambiente',al_auth_msg:'La escucha ambiente requiere autorización. Introduce la contraseña para abrir la llamada de escucha.',al_auth_label:'Contraseña de autorización',cancel:'Cancelar',rec_title:'Grabaciones',rec_log:'Grabación',rec_ev_start:'iniciada',rec_ev_stop:'detenida',rec_ev_play:'reproducida',rec_ev_download:'descargada',rec_ev_delete:'eliminada',rec_del:'Eliminar',rec_del_q:'¿Eliminar esta grabación del servidor?',rec_server:'Grabar en el servidor',rec_client:'Grabar en este equipo',rec_stop:'Parar',rec_refresh:'Actualizar',
+    rec_name_title:'Nombre de la grabación',rec_name:'Nombre del archivo',rec_ok:'Guardar',rec_on:'Grabando en el servidor: ',rec_local:'Grabando en este equipo…',rec_none:'Sin grabaciones',rec_dl:'Descargar',rec_need_op:'Toma el puesto para grabar en el servidor',al_denied:'Autorización de escucha ambiente fallida',
     amb_log:'Escucha ambiente',amb_started:'iniciada',amb_denied:'autorización denegada',
     causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
       7:'incompatible',8:'servicio no soportado',9:'expulsado',10:'identidad no válida',11:'desconexión de red',12:'sin canal',
@@ -249,6 +299,7 @@ function connect(){
     else if(m.type==='position'){positions[m.pos.issi]=m.pos;renderMap()}
     else if(m.type==='log'){logs.push(m.entry);if(logs.length>100)logs.shift();renderLog()}
     else if(m.type==='sds'){sdsMsgs.push(m.msg);if(sdsMsgs.length>100)sdsMsgs.shift();renderSds()}
+    else if(m.type==='recordings_changed')refreshRecs();
     else if(m.type==='error'){flash=t({busy:'busy_pos',al_denied:'al_denied'}[m.error]||'not_op');render()}
   };
 }
@@ -294,14 +345,101 @@ function onMic(f32){
   for(let i=0;i<n;i++){const x=i*ratio,i0=Math.floor(x),a=f32[i0]||0,b=f32[Math.min(i0+1,f32.length-1)]||0;
     const s=Math.max(-1,Math.min(1,a+(b-a)*(x-i0)));pcm[i]=s*32767|0}
   const m=new Int16Array(ulAcc.length+pcm.length);m.set(ulAcc);m.set(pcm,ulAcc.length);
+  if(cRec)cRec.push(pcm.slice());
   let off=0;while(m.length-off>=FRAME){ws.send(m.slice(off,off+FRAME).buffer);off+=FRAME}
   ulAcc=m.slice(off);
 }
 function playPcm(pcm){
+  if(cRec&&pcm.length)cRec.push(pcm.slice());
   if(!actx||!dlNode||!pcm.length)return;
   const ratio=actx.sampleRate/8000,n=Math.floor(pcm.length*ratio),out=new Float32Array(n);
   for(let i=0;i<n;i++){const x=i/ratio,i0=Math.floor(x),a=pcm[i0]||0,b=pcm[Math.min(i0+1,pcm.length-1)]||0;out[i]=(a+(b-a)*(x-i0))/32768}
   dlNode.port.postMessage(out,[out.buffer]);
+}
+
+// ── Recording ────────────────────────────────────────────────────────
+// Server: the operator's traffic is written to a WAV on the server. Client:
+// received + transmitted audio is kept in the browser and saved as a WAV.
+let cRec=null,cPending=null,recMode=null,recWasOn=false;
+function defaultRecName(){const d=new Date(),p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'-'+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds())}
+// File names always start with YYYYMMDD-HHMMSS.
+function stamped(name){name=name.trim();return /^\d{8}-\d{6}/.test(name)?name:(name?defaultRecName()+'-'+name:defaultRecName())}
+function openRecModal(mode){recMode=mode;$('rec-name').value=defaultRecName();$('rec-modal').classList.remove('hidden');$('rec-name').focus();$('rec-name').select()}
+function closeRecModal(){$('rec-modal').classList.add('hidden');recMode=null;cPending=null}
+function wavBlob(chunks){
+  const n=chunks.reduce((a,c)=>a+c.length,0),b=new ArrayBuffer(44+n*2),v=new DataView(b);
+  const w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i))};
+  w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+  v.setUint32(24,8000,true);v.setUint32(28,16000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
+  let o=44;for(const c of chunks)for(let i=0;i<c.length;i++,o+=2)v.setInt16(o,c[i],true);
+  return new Blob([b],{type:'audio/wav'});
+}
+function saveLocal(name){
+  const stem=stamped(name).replace(/\.wav$/i,'').replace(/[\\/:*?"<>|\s]+/g,'_').replace(/^\.+/,'').slice(0,64)||defaultRecName();
+  const a=document.createElement('a');a.href=URL.createObjectURL(wavBlob(cPending));a.download=stem+'.wav';
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+}
+$('rec-client').onclick=()=>{
+  if(cRec){cPending=cRec;cRec=null;renderRec();if(cPending.length)openRecModal('client');else cPending=null}
+  else{cRec=[];renderRec()}
+};
+$('rec-server').onclick=()=>{
+  if(st.recording)send({type:'rec_stop'});
+  else if(st.you_operate)openRecModal('server');
+};
+$('rec-ok').onclick=()=>{
+  const name=$('rec-name').value,mode=recMode;
+  if(mode==='client'&&cPending)saveLocal(name);
+  else if(mode==='server'&&name.trim())send({type:'rec_start',name:stamped(name)});
+  closeRecModal();
+};
+$('rec-cancel').onclick=closeRecModal;
+$('rec-name').addEventListener('keydown',e=>{if(e.key==='Enter')$('rec-ok').click();else if(e.key==='Escape')closeRecModal()});
+$('rec-refresh').onclick=()=>refreshRecs();
+let recFiles=[],recSel='';
+async function refreshRecs(){
+  try{
+    const r=await fetch('/recordings',{cache:'no-store'});if(!r.ok)return;
+    recFiles=await r.json();
+    if(!recFiles.some(e=>e.name===recSel))recSel=recFiles.length?recFiles[0].name:'';
+    renderRecList();
+  }catch(_){}
+}
+function renderRecList(){
+  const box=$('rec-list');
+  if(!recFiles.length){box.innerHTML=`<span class="muted">${t('rec_none')}</span>`;return}
+  const opts=recFiles.map(e=>`<option value="${esc(e.name)}"${e.name===recSel?' selected':''}>${esc(e.name)} · ${esc(fmtSecs(e.seconds))} · ${esc((e.bytes/1048576).toFixed(1))} MB</option>`).join('');
+  box.innerHTML=`<select id="rec-sel" style="width:100%" aria-label="${esc(t('rec_title'))}">${opts}</select>`+
+    `<div class="row" style="margin-top:8px"><a id="rec-dl" class="btn" href="#" download>${t('rec_dl')}</a>`+
+    `<button id="rec-del">${t('rec_del')}</button></div>`+
+    `<audio id="rec-audio" controls preload="none" style="width:100%;margin-top:8px"></audio>`;
+  $('rec-sel').onchange=e=>{recSel=e.target.value;selRec(true)};
+  $('rec-del').onclick=()=>{if(recSel&&confirm(t('rec_del_q')+'\n'+recSel))send({type:'rec_delete',file:recSel})};
+  selRec(false);
+}
+// Point the single player and the download link at the selected file; nothing is fetched until play.
+function selRec(reset){
+  const u='/recordings/'+encodeURIComponent(recSel),a=$('rec-audio');
+  $('rec-dl').href=u+'?dl=1';$('rec-dl').download=recSel;
+  if(reset||a.getAttribute('src')!==u){a.pause();a.setAttribute('src',u);a.load()}
+  updateRecDel();
+}
+function updateRecDel(){
+  const b=$('rec-del');if(!b)return;
+  b.disabled=!(st.you_operate&&!(st.recording&&st.recording.file===recSel));
+}
+function renderRec(){
+  const on=!!st.recording;
+  $('rec-server').textContent=on?t('rec_stop'):t('rec_server');
+  $('rec-server').disabled=!on&&!st.you_operate;
+  $('rec-server').title=!on&&!st.you_operate?t('rec_need_op'):'';
+  $('rec-client').textContent=cRec?t('rec_stop'):t('rec_client');
+  $('rec-client').classList.toggle('danger',!!cRec);
+  $('rec-state').textContent=on?t('rec_on')+st.recording.file:cRec?t('rec_local'):'';
+  if(recWasOn&&!on)refreshRecs();
+  recWasOn=on;
+  updateRecDel();
 }
 
 // ── Operator position ────────────────────────────────────────────────
@@ -351,8 +489,11 @@ $('al-modal').addEventListener('click',e=>{if(e.target===$('al-modal'))closeAlMo
 function locate(n,period){if(!(n>0))return;send({type:'locate',issi:n,period_s:period})}
 $('loc-once').onclick=()=>locate(parseInt($('loc-issi').value,10),0);
 $('loc-poll').onclick=()=>locate(parseInt($('loc-issi').value,10),Math.max(5,parseInt($('loc-period').value,10)||30));
+function blockIssi(n,block){if(n>0)send({type:'block',issi:n,block:block})}
+$('blk-add').onclick=()=>{blockIssi(parseInt($('blk-issi').value,10),true);$('blk-issi').value=''};
+$('blk-list').addEventListener('click',e=>{const i=parseInt(e.target.dataset.unblock,10);if(i)blockIssi(i,false)});
 $('polls').addEventListener('click',e=>{const i=parseInt(e.target.dataset.stop,10);if(i)send({type:'locate_stop',issi:i})});
-$('map').addEventListener('click',e=>{const b=e.target.closest('[data-loc]');if(b)locate(parseInt(b.dataset.loc,10),0)});
+$('map').addEventListener('click',e=>{const b=e.target.closest('[data-loc]');if(b)locate(parseInt(b.dataset.loc,10),0);const k=e.target.closest('[data-block]');if(k)blockIssi(parseInt(k.dataset.block,10),true)});
 $('answer').onclick=()=>send({type:'answer'});$('hangup').onclick=()=>send({type:'hangup'});
 
 // ── SDS ──────────────────────────────────────────────────────────────
@@ -379,26 +520,31 @@ const RADIO_SVG='<svg viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg"><re
   '<rect x="4" y="9" width="16" height="26" rx="3" fill="currentColor" stroke="#fff" stroke-width="1.5"/><rect x="7" y="12.5" width="10" height="7" rx="1" fill="#fff" opacity=".9"/>'+
   '<g fill="#fff" opacity=".85"><circle cx="8.5" cy="23.5" r="1.1"/><circle cx="12" cy="23.5" r="1.1"/><circle cx="15.5" cy="23.5" r="1.1"/>'+
   '<circle cx="8.5" cy="27" r="1.1"/><circle cx="12" cy="27" r="1.1"/><circle cx="15.5" cy="27" r="1.1"/><circle cx="8.5" cy="30.5" r="1.1"/><circle cx="12" cy="30.5" r="1.1"/><circle cx="15.5" cy="30.5" r="1.1"/></g></svg>';
-function radioIcon(talking){const w=talking?28:20,h=talking?42:30;
-  return L.divIcon({html:RADIO_SVG,className:'radio-icon'+(talking?' talking':''),iconSize:[w,h],iconAnchor:[w/2,h/2]})}
+function radioIcon(talking,emg){const big=talking||emg,w=big?28:20,h=big?42:30;
+  return L.divIcon({html:RADIO_SVG,className:'radio-icon'+(emg?' emergency':talking?' talking':''),iconSize:[w,h],iconAnchor:[w/2,h/2]})}
 function renderMap(){
   // Talker ISSI → talkgroup, from the calls on listened groups.
   const talking={};(st.active||[]).forEach(a=>talking[a.source]=a.gssi);
   const nopos=Object.keys(talking).filter(i=>!positions[i]);
-  $('map-info').textContent=t('radios')+Object.keys(positions).length+(nopos.length?' · '+t('talking_nopos')+nopos.map(i=>i+' (TG '+talking[i]+')').join(', '):'');
+  // Radios in an emergency (calls and alarms): drawn red.
+  const emgs={};(st.emergencies||[]).forEach(e=>emgs[e.issi]=e);
+  const emgNopos=Object.keys(emgs).filter(i=>!positions[i]);
+  $('map-info').textContent=t('radios')+Object.keys(positions).length+(nopos.length?' · '+t('talking_nopos')+nopos.map(i=>i+' (TG '+talking[i]+')').join(', '):'')+(emgNopos.length?' · 🚨 '+t('emergency')+': '+emgNopos.join(', ')+' ('+t('no_position')+')':'');
   const polls=st.polls||[];
   $('polls').innerHTML=polls.length?t('polling')+polls.map(p=>`${esc(p.issi)} (${esc(p.period_s)}s) <button data-stop="${esc(p.issi)}">${t('loc_stop')}</button>`).join(' '):'';
   if(!map)return;
   for(const [issi,p] of Object.entries(positions)){
-    const tg=talking[issi],tip=tg!=null?`${issi} · TG ${tg}`:String(issi);
+    const tg=talking[issi],emg=!!emgs[issi],loud=tg!=null||emg;
+    const tip=(emg?'🚨 ':'')+(tg!=null?`${issi} · TG ${tg}`:String(issi));
     let m=markers[issi];
     if(!m){m=markers[issi]=L.marker([p.lat,p.lon]).addTo(map)}
     m.setLatLng([p.lat,p.lon]);
-    if(m.talking!==(tg!=null)){m.talking=tg!=null;m.setIcon(radioIcon(m.talking));m.setZIndexOffset(m.talking?1000:0)}
-    m.unbindTooltip().bindTooltip(tip,{permanent:tg!=null,direction:'top',offset:[0,tg!=null?-24:-18],className:tg!=null?'talk':''});
-    m.unbindPopup().bindPopup(`<b>ISSI ${esc(issi)}</b>${tg!=null?'<br>TG '+esc(tg):''}<br>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`+
+    if(m.talking!==(tg!=null)||m.emg!==emg){m.talking=tg!=null;m.emg=emg;m.setIcon(radioIcon(m.talking,emg));m.setZIndexOffset(emg?5000:m.talking?1000:0)}
+    m.unbindTooltip().bindTooltip(tip,{permanent:loud,direction:'top',offset:[0,loud?-24:-18],className:emg?'emg':tg!=null?'talk':''});
+    m.unbindPopup().bindPopup((emg?`<b style="color:#c62828">🚨 ${t('emergency')}</b><br>`:'')+`<b>ISSI ${esc(issi)}</b>${tg!=null?'<br>TG '+esc(tg):''}<br>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`+
       (p.speed!=null?`<br>${Math.round(p.speed)} km/h`+(p.heading!=null?` · ${Math.round(p.heading)}°`:''):'')+`<br>${hhmm(p.ts)}`+
-      `<br><button data-loc="${esc(issi)}" style="margin-top:6px">${t('loc_once')}</button>`);
+      `<br><button data-loc="${esc(issi)}" style="margin-top:6px">${t('loc_once')}</button>`+
+      (st.can_block&&!(st.blacklist||[]).includes(Number(issi))?` <button data-block="${esc(issi)}" class="danger" style="margin-top:6px">${t('block')}</button>`:''));
   }
   const pts=Object.values(positions);
   if(!fitted&&pts.length){fitted=true;map.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lon])).pad(.2),{maxZoom:15})}
@@ -410,12 +556,15 @@ function fmtSecs(s){s=Math.max(0,s|0);return String(s/60|0).padStart(2,'0')+':'+
 function renderLog(){
   $('log').innerHTML=logs.slice().reverse().map(e=>{
     let txt='';
-    if(e.kind==='group_rx')txt=`${t('group_rx')} ${esc(e.gssi)} · ${esc(e.source)}`;
+    if(e.kind==='block')txt=`${e.block?t('block_log'):t('unblock_log')} ISSI ${esc(e.issi)}`;
+    else if(e.kind==='emergency')txt=`🚨 ${t('emergency')} · ISSI ${esc(e.issi)}${e.gssi!=null?' → '+esc(e.gssi):''}`;
+    else if(e.kind==='group_rx')txt=`${e.emergency?'🚨 ':''}${t('group_rx')} ${esc(e.gssi)} · ${esc(e.source)}${e.emergency?' · '+t('emerg_call'):''}`;
     else if(e.kind==='group_tx')txt=`${t('group_tx')} · ${esc(e.gssi)}`;
     else if(e.kind==='link')txt=e.up?t('link_up'):t('link_down')+(e.reason?' · '+esc(e.reason):'');
     else if(e.kind==='location_req')txt=(e.period_s?t('loc_req_poll')+` · ${e.period_s}s`:t('loc_req_once'))+` · ${esc(e.issi)}`;
     else if(e.kind==='private'){txt=t('priv_'+e.event)+` ${e.dir==='in'?'←':'→'} ${esc(e.peer)}`;
       if(e.secs!=null)txt+=` · ${fmtSecs(e.secs)}`;if(e.event!=='connected'&&e.cause!=null)txt+=` · ${causeText(e.cause)}`}
+    else if(e.kind==='recording')txt=`${t('rec_log')} ${t('rec_ev_'+e.event)} · ${esc(e.file)}${e.by?' · '+esc(e.by):''}`;
     else if(e.kind==='ambience')txt=`${t('amb_log')} → ${esc(e.issi)} · ${e.authorized?t('amb_started'):t('amb_denied')}`;
     return `<div class="msg"><span class="meta">${hhmm(e.ts)}</span> ${txt}</div>`}).join('');
 }
@@ -430,6 +579,11 @@ function render(){
   $('claim').disabled=!wsUp;
   $('opinfo').textContent=t('operator')+(op?t('you'):(st.operator||t('none')));
   document.querySelectorAll('#ptt,#call-duplex,#call-simplex,#call-ambience,#tg-add,#sds-send,#txsel,#loc-once,#loc-poll').forEach(b=>b.disabled=!op);
+  // Blacklist on the connected brew-server: editable by the operator when brew-server allows this console.
+  const canBlock=op&&!!st.can_block,bl=st.blacklist||[];
+  $('blk-add').disabled=!canBlock;$('blk-issi').disabled=!canBlock;
+  $('blk-state').textContent=st.can_block?'':t('block_na');
+  $('blk-list').innerHTML=bl.length?bl.map(i=>`<span class="pill" style="margin:2px">${esc(i)} <button data-unblock="${esc(i)}" ${canBlock?'':'disabled'}>${t('unblock')}</button></span>`).join(''):`<span class="muted">${t('block_none')}</span>`;
 
   // Talkgroups
   const groups=knownGroups(),listen=new Set(st.listen||[]);
@@ -438,6 +592,9 @@ function render(){
     <td><input type="radio" name="tx" data-g="${g}" ${g===st.tx_group?'checked':''} ${op?'':'disabled'}></td>
     <td><button data-rm="${g}" ${op?'':'disabled'}>${t('remove')}</button></td></tr>`).join('');
   $('txsel').innerHTML='<option value="0">—</option>'+groups.map(g=>`<option value="${g}" ${g===st.tx_group?'selected':''}>${g}</option>`).join('');
+  const emg=st.emergencies||[];
+  $('emergency').classList.toggle('hidden',!emg.length);
+  $('emergency-list').innerHTML=emg.map(e=>`<span class="echip">ISSI ${esc(e.issi)}${e.gssi!=null?' → '+esc(e.gssi)+' · '+t('emerg_call'):''}</span>`).join('');
   $('active').textContent=(st.active&&st.active.length)?t('active')+st.active.map(a=>a.gssi+' ('+a.source+')').join(', '):'';
 
   // PTT / RX
@@ -470,6 +627,7 @@ function render(){
   }
   tickTimer();
   renderMap();
+  renderRec();
 }
 function tickTimer(){const p=st.private;$('call-timer').textContent=p&&p.connected_ms?fmtSecs((Date.now()-p.connected_ms)/1000):''}
 setInterval(tickTimer,1000);
@@ -477,6 +635,7 @@ if(!window.isSecureContext)$('insecure').classList.remove('hidden');
 initMap();
 applyLang();
 connect();
+refreshRecs();
 </script>
 </body>
 </html>
