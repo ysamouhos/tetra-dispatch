@@ -13,6 +13,7 @@ mod sds;
 mod web;
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::{broadcast, mpsc};
@@ -34,6 +35,19 @@ async fn main() -> anyhow::Result<()> {
         "Tetra Dispatch starting"
     );
 
+    // Operator accounts replace the single position and the console password.
+    let auth = if cfg.dispatch.operators.is_empty() {
+        web::Auth::Basic(Arc::new(cfg.web.password.clone()))
+    } else {
+        if !cfg.web.password.is_empty() {
+            tracing::warn!("[web] password is ignored: operator accounts are configured, the console asks for a login");
+        }
+        for (name, o) in &cfg.dispatch.operators {
+            tracing::info!(name, issi = o.issi, role = o.role.as_str(), "operator account");
+        }
+        web::Auth::Accounts(Arc::new(Mutex::new(accounts::Accounts::new(cfg.dispatch.operators.clone(), path.clone()))))
+    };
+
     let (events_tx, events_rx) = mpsc::channel(1024);
     let (ui_tx, _) = broadcast::channel(1024);
 
@@ -53,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     tokio::select! {
-        r = web::run(cfg.web.clone(), cfg.dispatch.recordings_dir.clone(), events_tx, ui_tx) => r,
+        r = web::run(cfg.web.clone(), auth, cfg.dispatch.recordings_dir.clone(), events_tx, ui_tx) => r,
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("shutting down");
             Ok(())

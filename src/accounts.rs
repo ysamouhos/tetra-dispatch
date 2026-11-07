@@ -131,14 +131,6 @@ impl Accounts {
         self.operators = next;
         Ok(())
     }
-
-    /// Account names with a live session.
-    pub fn online(&self) -> Vec<&str> {
-        let mut v: Vec<&str> = self.sessions.values().map(String::as_str).collect();
-        v.sort_unstable();
-        v.dedup();
-        v
-    }
 }
 
 /// The `td_session` value from a `Cookie` header.
@@ -170,7 +162,6 @@ mod tests {
         let token = a.login("dave", "secret").unwrap();
         assert_eq!(token.len(), 64);
         assert_eq!(a.session(&token), Some("dave"));
-        assert_eq!(a.online(), vec!["dave"]);
         assert!(a.session("bogus").is_none());
         a.logout(&token);
         assert!(a.session(&token).is_none());

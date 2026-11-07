@@ -1551,6 +1551,7 @@ impl Dispatcher {
     }
 
     /// The status as the first seat's consoles see it (the only seat, without accounts).
+    #[cfg(test)]
     fn status(&self) -> Value {
         let mut s = self.shared_status();
         Self::merge(&mut s, self.seat_status(self.seats.first()));
