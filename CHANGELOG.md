@@ -2,6 +2,36 @@
 
 All notable changes to Tetra Dispatch, newest first.
 
+## Unreleased
+
+- **Several operators.** Accounts under `[dispatch.operators.<name>]`
+  (`password`, `issi`, `role`, optional `groups` and `tx_group`) give each
+  operator their own seat: their own ISSI registered on the brew-server, their
+  own listen list and TX group, private calls and PTT, all at once over the
+  one Brew link. Group calls are played on every seat listening to the group,
+  a private call rings on the seat owning the called ISSI, SDS is sent from
+  the seat's ISSI and shown with the operator's name, and an operator's
+  transmission is heard by the other seats listening to that group. Without
+  accounts nothing changes: one position, `[dispatch] operator_issi`, `[web]
+  password`.
+- **Login.** With accounts the console opens on a sign-in form; a session
+  cookie (`HttpOnly`, `SameSite=Strict`, in memory) binds the browser and its
+  WebSocket to the account, and there is a Log out button. `[web] password`
+  is ignored, with a warning. Roles: `viewer` watches only, `operator` holds a
+  seat, `admin` also manages accounts.
+- **Operators card and account API.** The console lists the accounts, who is
+  online and who holds each seat. Admins add, edit and remove accounts there
+  (or over `GET/POST/DELETE /api/operators[/<name>]`); a new seat registers on
+  the network at once, a removed one is deregistered and its browsers logged
+  out, and the config file's `dispatch.operators` table is rewritten in place
+  (temp file and rename). The last admin and your own account cannot be
+  removed.
+- **Operator in the logs.** Activity and SDS entries carry an `operator`
+  field, shown in the console and on the logs page; status JSON gains
+  `operators` and, per console, `me`.
+
+Contributed by David Harcus MM7FDM.
+
 ## 1.3.0
 
 - **Voice recording.** A "Recordings" card records on the server (the
