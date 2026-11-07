@@ -86,6 +86,11 @@ th{color:var(--muted);font-weight:500}
 .modal p{margin:0 0 12px;color:var(--muted);font-size:14px}
 .modal input{width:100%;margin-bottom:12px}
 .modal .row{justify-content:flex-end}
+#login{background:var(--bg)}
+#login .box{max-width:320px}
+#login h3{font-size:18px}
+td .pill{padding:1px 8px;font-size:12px}
+#ops-admin input,#ops-admin select{flex:1 1 110px}
 </style>
 </head>
 <body>
@@ -95,10 +100,12 @@ th{color:var(--muted);font-weight:500}
   <span id="link" class="pill off"><span class="dot"></span><span id="link-text"></span></span>
   <span class="pill"><span data-t="issi"></span>&nbsp;<b id="issi">—</b></span>
   <span class="grow"></span>
+  <span id="me" class="pill on hidden"><span class="dot"></span><b id="me-name"></b><span id="me-role"></span></span>
   <a href="/log" target="_blank" class="pill" data-t="logs"></a>
   <span id="opinfo" class="muted"></span>
   <button id="claim" class="primary" data-t="claim"></button>
   <button id="release" class="hidden" data-t="release"></button>
+  <button id="logout" class="hidden" data-t="logout"></button>
   <select id="lang" aria-label="Language"><option value="es">ES</option><option value="en">EN</option></select>
   <button id="theme" title="Theme">◐</button>
   <span class="muted" id="version" title="Version">v__VERSION__</span>
@@ -172,6 +179,25 @@ th{color:var(--muted);font-weight:500}
     <div id="rec-list" class="list" style="margin-top:8px"></div>
   </section>
 
+  <section class="card hidden" id="ops-card">
+    <h2 data-t="ops_title"></h2>
+    <table><thead><tr><th data-t="ops_name"></th><th>ISSI</th><th data-t="ops_role"></th><th data-t="ops_status"></th><th></th></tr></thead><tbody id="ops"></tbody></table>
+    <div id="ops-admin" class="hidden" style="margin-top:10px">
+      <div class="row">
+        <input id="op-name" type="text" maxlength="32" autocomplete="off" data-tp="ops_name">
+        <input id="op-pass" type="password" autocomplete="new-password" data-tp="ops_password">
+        <input id="op-issi" type="number" min="1" max="16777214" inputmode="numeric" placeholder="ISSI">
+        <select id="op-role" aria-label="Role"><option value="operator"></option><option value="admin"></option><option value="viewer"></option></select>
+      </div>
+      <div class="row">
+        <input id="op-groups" type="text" autocomplete="off" data-tp="ops_groups">
+        <input id="op-tx" type="number" min="1" max="16777214" inputmode="numeric" data-tp="ops_tx">
+        <button id="op-save" class="primary" data-t="ops_save"></button>
+      </div>
+      <div id="op-err" class="err"></div>
+    </div>
+  </section>
+
   <section class="card span2">
     <h2 data-t="map"></h2>
     <div id="map"></div>
@@ -214,6 +240,16 @@ th{color:var(--muted);font-weight:500}
     </div>
   </div>
 </div>
+<div id="login" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="login-title">
+  <div class="box">
+    <h3 id="login-title">Tetra Dispatch</h3>
+    <p data-t="login_msg"></p>
+    <input id="login-name" type="text" autocomplete="username" autocapitalize="off" data-tp="login_name">
+    <input id="login-pass" type="password" autocomplete="current-password" data-tp="login_pass">
+    <div id="login-err" class="err"></div>
+    <div class="row"><button id="login-ok" class="primary" data-t="login_ok"></button></div>
+  </div>
+</div>
 <div id="rec-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="rec-title">
   <div class="box">
     <h3 id="rec-title" data-t="rec_name_title"></h3>
@@ -243,6 +279,11 @@ const LANGS={
     al_auth_title:'Authorize ambient listen',al_auth_msg:'Ambient listen needs authorization. Enter the password to open a listening call.',al_auth_label:'Authorization password',cancel:'Cancel',rec_title:'Recordings',rec_log:'Recording',rec_ev_start:'started',rec_ev_stop:'stopped',rec_ev_play:'played',rec_ev_download:'downloaded',rec_ev_delete:'deleted',rec_del:'Delete',rec_del_q:'Delete this recording from the server?',rec_server:'Record on server',rec_client:'Record on this device',rec_stop:'Stop',rec_refresh:'Refresh',
     rec_name_title:'Recording name',rec_name:'File name',rec_ok:'Save',rec_on:'Recording on server: ',rec_local:'Recording on this device…',rec_none:'No recordings',rec_dl:'Download',rec_need_op:'Take the position to record on the server',al_denied:'Ambient-listen authorization failed',
     amb_log:'Ambient listen',amb_started:'started',amb_denied:'authorization denied',
+    logout:'Log out',login_msg:'Sign in with your operator account.',login_name:'Name',login_pass:'Password',login_ok:'Sign in',login_bad:'Wrong name or password',
+    ops_title:'Operators',ops_name:'Name',ops_role:'Role',ops_status:'Status',ops_online:'online',ops_offline:'offline',ops_held:'seat held by',ops_free:'seat free',
+    ops_password:'Password',ops_groups:'Groups (91, 92)',ops_tx:'TX group',ops_save:'Save',ops_edit:'Edit',ops_delete:'Remove',ops_del_q:'Remove this account? Its consoles are logged out.',
+    role_admin:'admin',role_operator:'operator',role_viewer:'viewer',viewer_hint:'Viewer account: watch only',
+    acct_log:'Account',acct_added:'added',acct_updated:'updated',acct_removed:'removed',
     causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
       7:'incompatible',8:'service not supported',9:'pre-empted',10:'invalid identity',11:'SwMI disconnect',12:'no idle cc',
       13:'timeout',14:'SwMI disconnect'}},
@@ -262,6 +303,11 @@ const LANGS={
     al_auth_title:'Autorizar escucha ambiente',al_auth_msg:'La escucha ambiente requiere autorización. Introduce la contraseña para abrir la llamada de escucha.',al_auth_label:'Contraseña de autorización',cancel:'Cancelar',rec_title:'Grabaciones',rec_log:'Grabación',rec_ev_start:'iniciada',rec_ev_stop:'detenida',rec_ev_play:'reproducida',rec_ev_download:'descargada',rec_ev_delete:'eliminada',rec_del:'Eliminar',rec_del_q:'¿Eliminar esta grabación del servidor?',rec_server:'Grabar en el servidor',rec_client:'Grabar en este equipo',rec_stop:'Parar',rec_refresh:'Actualizar',
     rec_name_title:'Nombre de la grabación',rec_name:'Nombre del archivo',rec_ok:'Guardar',rec_on:'Grabando en el servidor: ',rec_local:'Grabando en este equipo…',rec_none:'Sin grabaciones',rec_dl:'Descargar',rec_need_op:'Toma el puesto para grabar en el servidor',al_denied:'Autorización de escucha ambiente fallida',
     amb_log:'Escucha ambiente',amb_started:'iniciada',amb_denied:'autorización denegada',
+    logout:'Salir',login_msg:'Entra con tu cuenta de operador.',login_name:'Nombre',login_pass:'Contraseña',login_ok:'Entrar',login_bad:'Nombre o contraseña incorrectos',
+    ops_title:'Operadores',ops_name:'Nombre',ops_role:'Rol',ops_status:'Estado',ops_online:'conectado',ops_offline:'desconectado',ops_held:'puesto ocupado por',ops_free:'puesto libre',
+    ops_password:'Contraseña',ops_groups:'Grupos (91, 92)',ops_tx:'Grupo TX',ops_save:'Guardar',ops_edit:'Editar',ops_delete:'Quitar',ops_del_q:'¿Quitar esta cuenta? Sus consolas se desconectan.',
+    role_admin:'administrador',role_operator:'operador',role_viewer:'observador',viewer_hint:'Cuenta de observador: solo ver',
+    acct_log:'Cuenta',acct_added:'añadida',acct_updated:'actualizada',acct_removed:'quitada',
     causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
       7:'incompatible',8:'servicio no soportado',9:'expulsado',10:'identidad no válida',11:'desconexión de red',12:'sin canal',
       13:'tiempo agotado',14:'desconexión de red'}},
@@ -275,6 +321,7 @@ function applyLang(){
   document.querySelectorAll('[data-t]').forEach(e=>e.textContent=t(e.dataset.t));
   document.querySelectorAll('[data-tp]').forEach(e=>e.placeholder=t(e.dataset.tp));
   $('call-ambience').title=t('amb_hint');
+  $('op-role').querySelectorAll('option').forEach(o=>o.textContent=t('role_'+o.value));
   render();renderLog();renderSds();
 }
 function setTheme(th){if(th)document.documentElement.dataset.theme=th;else delete document.documentElement.dataset.theme}
@@ -283,14 +330,41 @@ $('theme').onclick=()=>{const cur=document.documentElement.dataset.theme||(match
   const nx=cur==='dark'?'light':'dark';setTheme(nx);try{localStorage.setItem('td_theme',nx)}catch(_){}};
 $('lang').onchange=e=>{lang=e.target.value;try{localStorage.setItem('td_lang',lang)}catch(_){}applyLang()};
 
+// ── Login ────────────────────────────────────────────────────────────
+// With operator accounts ('accounts') the server wants a session cookie;
+// the page asks for a name and password until it has one.
+const AUTH='__AUTH__';
+let me=null;
+async function whoami(){
+  if(AUTH!=='accounts')return true;
+  try{const r=await fetch('/api/me',{cache:'no-store'});
+    if(r.status===401){showLogin();return false}
+    if(!r.ok)return false;
+    me=await r.json();hideLogin();return true}
+  catch(_){return false}
+}
+function showLogin(){me=null;$('login').classList.remove('hidden');$('login-name').focus()}
+function hideLogin(){$('login').classList.add('hidden');$('login-err').textContent=''}
+async function start(){if(await whoami()){connect();refreshRecs();loadOps()}}
+$('login-ok').onclick=async()=>{
+  const name=$('login-name').value.trim(),password=$('login-pass').value;if(!name)return;
+  try{const r=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,password})});
+    if(!r.ok){$('login-err').textContent=t('login_bad');return}
+    $('login-pass').value='';await start()}
+  catch(_){$('login-err').textContent=t('login_bad')}
+};
+['login-name','login-pass'].forEach(id=>$(id).addEventListener('keydown',e=>{if(e.key==='Enter')$('login-ok').click()}));
+$('logout').onclick=async()=>{try{await fetch('/logout',{method:'POST'})}catch(_){}stopAudio();if(ws)ws.close();showLogin()};
+
 // ── WebSocket ────────────────────────────────────────────────────────
 let ws=null,wsUp=false,st={},logs=[],sdsMsgs=[],positions={},flash='';
 function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
 function connect(){
+  if(ws&&ws.readyState<2)return;
   ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
   ws.binaryType='arraybuffer';
   ws.onopen=()=>{wsUp=true;render()};
-  ws.onclose=()=>{wsUp=false;st={};pttHeld=false;stopAudio();render();setTimeout(connect,2000)};
+  ws.onclose=()=>{wsUp=false;st={};pttHeld=false;stopAudio();render();setTimeout(async()=>{if(await whoami())connect()},2000)};
   ws.onmessage=ev=>{
     if(typeof ev.data!=='string'){playPcm(new Int16Array(ev.data));return}
     const m=JSON.parse(ev.data);
@@ -300,7 +374,7 @@ function connect(){
     else if(m.type==='log'){logs.push(m.entry);if(logs.length>100)logs.shift();renderLog()}
     else if(m.type==='sds'){sdsMsgs.push(m.msg);if(sdsMsgs.length>100)sdsMsgs.shift();renderSds()}
     else if(m.type==='recordings_changed')refreshRecs();
-    else if(m.type==='error'){flash=t({busy:'busy_pos',al_denied:'al_denied'}[m.error]||'not_op');render()}
+    else if(m.type==='error'){flash=t({busy:'busy_pos',al_denied:'al_denied',viewer:'viewer_hint'}[m.error]||'not_op');render()}
   };
 }
 
@@ -502,7 +576,7 @@ $('sds-send').onclick=()=>{const to=parseInt($('sds-to').value,10),text=$('sds-t
 $('sds-text').addEventListener('keydown',e=>{if(e.key==='Enter')$('sds-send').click()});
 function hhmm(ms){return new Date(ms).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
 function renderSds(){
-  $('sds-list').innerHTML=sdsMsgs.slice().reverse().map(m=>`<div class="msg"><div class="meta">${hhmm(m.ts)} · ${m.dir==='in'?esc(m.from)+' → '+esc(m.to):'→ '+esc(m.to)}${m.delivered?' · ✓ '+t('delivered'):''}</div>${esc(m.text)}</div>`).join('');
+  $('sds-list').innerHTML=sdsMsgs.slice().reverse().map(m=>`<div class="msg"><div class="meta">${hhmm(m.ts)} · ${m.dir==='in'?esc(m.from)+' → '+esc(m.to):'→ '+esc(m.to)}${m.operator?' · '+esc(m.operator):''}${m.delivered?' · ✓ '+t('delivered'):''}</div>${esc(m.text)}</div>`).join('');
 }
 
 // ── Map ──────────────────────────────────────────────────────────────
@@ -550,6 +624,45 @@ function renderMap(){
   if(!fitted&&pts.length){fitted=true;map.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lon])).pad(.2),{maxZoom:15})}
 }
 
+// ── Operators ────────────────────────────────────────────────────────
+// Who is configured, online and holding a seat comes with the status; the
+// account settings (groups, TX group) come from the API for the admin form.
+let opsCfg={};
+async function loadOps(){
+  if(AUTH!=='accounts')return;
+  try{const r=await fetch('/api/operators',{cache:'no-store'});if(!r.ok)return;
+    opsCfg={};(await r.json()).forEach(o=>opsCfg[o.name]=o);renderOps()}catch(_){}
+}
+function renderOps(){
+  const ops=st.operators,mine=st.me||me||{};
+  $('ops-card').classList.toggle('hidden',!ops);
+  if(!ops)return;
+  const admin=mine.role==='admin';
+  $('ops-admin').classList.toggle('hidden',!admin);
+  $('ops').innerHTML=ops.map(o=>`<tr><td>${esc(o.name)}${o.name===mine.name?` <span class="muted">(${t('you')})</span>`:''}</td><td>${o.issi!=null?esc(o.issi):'—'}</td><td>${t('role_'+o.role)}</td>`+
+    `<td><span class="pill ${o.online?'on':'off'}"><span class="dot"></span>${o.online?t('ops_online'):t('ops_offline')}</span>${o.role!=='viewer'?' <span class="muted">'+(o.seat_held_by?t('ops_held')+' '+esc(o.seat_held_by):t('ops_free'))+'</span>':''}</td>`+
+    `<td>${admin?`<button data-edit="${esc(o.name)}">${t('ops_edit')}</button> <button data-del="${esc(o.name)}" class="danger" ${o.name===mine.name?'disabled':''}>${t('ops_delete')}</button>`:''}</td></tr>`).join('');
+}
+$('ops').addEventListener('click',async e=>{
+  const edit=e.target.dataset.edit,del=e.target.dataset.del;
+  if(edit){const o=opsCfg[edit]||{};$('op-name').value=edit;$('op-pass').value='';$('op-issi').value=o.issi||'';$('op-role').value=o.role||'operator';
+    $('op-groups').value=(o.groups||[]).join(', ');$('op-tx').value=o.tx_group||'';$('op-name').focus()}
+  else if(del&&confirm(t('ops_del_q')+'\n'+del)){
+    try{const r=await fetch('/api/operators/'+encodeURIComponent(del),{method:'DELETE'});const j=await r.json().catch(()=>({}));
+      $('op-err').textContent=r.ok?'':(j.error||r.status);if(r.ok)loadOps()}catch(err){$('op-err').textContent=String(err)}}
+});
+$('op-save').onclick=async()=>{
+  const name=$('op-name').value.trim();if(!name)return;
+  const body={issi:parseInt($('op-issi').value,10)||0,role:$('op-role').value};
+  if($('op-pass').value)body.password=$('op-pass').value;
+  const g=$('op-groups').value.trim();if(g)body.groups=g.split(/[\s,]+/).map(x=>parseInt(x,10)).filter(x=>x>0);
+  const tx=parseInt($('op-tx').value,10);if(tx>0)body.tx_group=tx;
+  try{const r=await fetch('/api/operators/'+encodeURIComponent(name),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok){$('op-err').textContent='';$('op-pass').value='';loadOps()}else $('op-err').textContent=j.error||r.status}
+  catch(err){$('op-err').textContent=String(err)}
+};
+
 // ── Rendering ────────────────────────────────────────────────────────
 function causeText(c){return (LANGS[lang].causes||LANGS.en.causes)[c]||String(c)}
 function fmtSecs(s){s=Math.max(0,s|0);return String(s/60|0).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
@@ -566,6 +679,9 @@ function renderLog(){
       if(e.secs!=null)txt+=` · ${fmtSecs(e.secs)}`;if(e.event!=='connected'&&e.cause!=null)txt+=` · ${causeText(e.cause)}`}
     else if(e.kind==='recording')txt=`${t('rec_log')} ${t('rec_ev_'+e.event)} · ${esc(e.file)}${e.by?' · '+esc(e.by):''}`;
     else if(e.kind==='ambience')txt=`${t('amb_log')} → ${esc(e.issi)} · ${e.authorized?t('amb_started'):t('amb_denied')}`;
+    else if(e.kind==='account')txt=`${t('acct_log')} ${esc(e.name)} · ${t('acct_'+e.event)}${e.issi?' · ISSI '+esc(e.issi):''}`;
+    // The operator behind the entry, with accounts (recordings already say who).
+    if(e.operator&&e.operator!==e.by)txt+=` · ${esc(e.operator)}`;
     return `<div class="msg"><span class="meta">${hhmm(e.ts)}</span> ${txt}</div>`}).join('');
 }
 function render(){
@@ -574,10 +690,14 @@ function render(){
   $('link-text').textContent=!wsUp?t('console_down'):st.connected?t('connected'):(st.link_error?t('disconnected'):t('connecting'));
   link.title=st.link_error||'';
   $('issi').textContent=st.issi||'—';
-  const op=!!st.you_operate;
-  $('claim').classList.toggle('hidden',op);$('release').classList.toggle('hidden',!op);
+  const op=!!st.you_operate,mine=st.me||me,viewer=!!mine&&mine.role==='viewer';
+  $('me').classList.toggle('hidden',!mine);
+  if(mine){$('me-name').textContent=mine.name||'';$('me-role').textContent=' · '+t('role_'+mine.role)}
+  $('logout').classList.toggle('hidden',AUTH!=='accounts');
+  $('claim').classList.toggle('hidden',op||viewer);$('release').classList.toggle('hidden',!op);
   $('claim').disabled=!wsUp;
-  $('opinfo').textContent=t('operator')+(op?t('you'):(st.operator||t('none')));
+  $('opinfo').textContent=viewer?t('viewer_hint'):t('operator')+(op?t('you'):(st.operator||t('none')));
+  renderOps();
   document.querySelectorAll('#ptt,#call-duplex,#call-simplex,#call-ambience,#tg-add,#sds-send,#txsel,#loc-once,#loc-poll').forEach(b=>b.disabled=!op);
   // Blacklist on the connected brew-server: editable by the operator when brew-server allows this console.
   const canBlock=op&&!!st.can_block,bl=st.blacklist||[];
@@ -634,8 +754,7 @@ setInterval(tickTimer,1000);
 if(!window.isSecureContext)$('insecure').classList.remove('hidden');
 initMap();
 applyLang();
-connect();
-refreshRecs();
+start();
 </script>
 </body>
 </html>

@@ -66,21 +66,23 @@ td.text{white-space:pre-wrap;word-break:break-word}
 'use strict';
 const LANGS={
   en:{title:'Logs',back:'← Console',activity:'Activity',search:'Search…',time:'Time',event:'Event',details:'Details',
-    from:'From',to:'To',text:'Message',status:'Status',delivered:'delivered',sent:'sent',received:'received',
+    from:'From',to:'To',text:'Message',status:'Status',delivered:'delivered',sent:'sent',received:'received',operator:'Operator',
     shown:'{n} of {t} entries (kept in memory, lost on restart)',empty:'No entries',
     group_rx:'Group call',group_tx:'Dispatcher transmitted',loc_req_once:'Location requested',loc_req_poll:'Location polling',link_up:'Brew link up',link_down:'Brew link down',
     rec_log:'Recording',rec_ev_start:'started',rec_ev_stop:'stopped',rec_ev_play:'played',rec_ev_download:'downloaded',rec_ev_delete:'deleted',
     amb_log:'Ambient listen',amb_started:'started',amb_denied:'authorization denied',
+    acct_log:'Account',acct_added:'added',acct_updated:'updated',acct_removed:'removed',
     priv_connected:'Private call connected',priv_ended:'Private call ended',priv_failed:'Private call failed',priv_rejected:'Private call rejected',
     causes:{0:'not defined',1:'hung up',2:'busy',3:'not reachable',4:'no encryption support',5:'congestion',6:'not allowed',
       7:'incompatible',8:'service not supported',9:'pre-empted',10:'invalid identity',11:'SwMI disconnect',12:'no idle cc',
       13:'timeout',14:'SwMI disconnect'}},
   es:{title:'Registros',back:'← Consola',activity:'Actividad',search:'Buscar…',time:'Hora',event:'Evento',details:'Detalles',
-    from:'De',to:'A',text:'Mensaje',status:'Estado',delivered:'entregado',sent:'enviado',received:'recibido',
+    from:'De',to:'A',text:'Mensaje',status:'Estado',delivered:'entregado',sent:'enviado',received:'recibido',operator:'Operador',
     shown:'{n} de {t} entradas (en memoria, se pierden al reiniciar)',empty:'Sin entradas',
     group_rx:'Llamada de grupo',group_tx:'Transmitió el despacho',loc_req_once:'Localización solicitada',loc_req_poll:'Sondeo de localización',link_up:'Enlace Brew activo',link_down:'Enlace Brew caído',
     rec_log:'Grabación',rec_ev_start:'iniciada',rec_ev_stop:'detenida',rec_ev_play:'reproducida',rec_ev_download:'descargada',rec_ev_delete:'eliminada',
     amb_log:'Escucha ambiente',amb_started:'iniciada',amb_denied:'autorización denegada',
+    acct_log:'Cuenta',acct_added:'añadida',acct_updated:'actualizada',acct_removed:'quitada',
     priv_connected:'Llamada privada conectada',priv_ended:'Llamada privada finalizada',priv_failed:'Llamada privada fallida',priv_rejected:'Llamada privada rechazada',
     causes:{0:'sin definir',1:'colgó',2:'ocupado',3:'no localizable',4:'sin cifrado',5:'congestión',6:'no permitido',
       7:'incompatible',8:'servicio no soportado',9:'expulsado',10:'identidad no válida',11:'desconexión de red',12:'sin canal',
@@ -114,18 +116,20 @@ function logRow(e){
     if(e.secs!=null)det+=` · ${fmtSecs(e.secs)}`;if(e.event!=='connected'&&e.cause!=null)det+=` · ${causeText(e.cause)}`}
   else if(e.kind==='recording'){ev=`${t('rec_log')} ${t('rec_ev_'+e.event)}`;det=e.file+(e.by?' · '+e.by:'')}
   else if(e.kind==='ambience'){ev=t('amb_log');det=`→ ${e.issi} · ${e.authorized?t('amb_started'):t('amb_denied')}`}
-  return [stamp(e.ts),ev,det];
+  else if(e.kind==='account'){ev=`${t('acct_log')} ${t('acct_'+e.event)}`;det=e.name+(e.issi?` · ISSI ${e.issi}`:'')}
+  // The operator behind the entry, with accounts (recordings already say who).
+  return [stamp(e.ts),ev,det,e.operator||e.by||''];
 }
 function sdsRow(m){
   const status=m.dir==='in'?t('received'):m.delivered?t('delivered'):t('sent');
-  return [stamp(m.ts),m.dir==='in'?m.from:'',m.to,m.text,status];
+  return [stamp(m.ts),m.dir==='in'?m.from:'',m.to,m.text,status,m.operator||''];
 }
 function rows(){
   const src=tab==='log'?logs:sds,fn=tab==='log'?logRow:sdsRow,q=$('q').value.trim().toLowerCase();
   const all=src.slice().reverse().map(fn);
   return {all,shown:q?all.filter(r=>r.some(c=>String(c).toLowerCase().includes(q))):all};
 }
-function cols(){return tab==='log'?[t('time'),t('event'),t('details')]:[t('time'),t('from'),t('to'),t('text'),t('status')]}
+function cols(){return tab==='log'?[t('time'),t('event'),t('details'),t('operator')]:[t('time'),t('from'),t('to'),t('text'),t('status'),t('operator')]}
 
 // ── Rendering ────────────────────────────────────────────────────────
 function render(){
