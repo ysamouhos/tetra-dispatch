@@ -2,7 +2,7 @@
 
 All notable changes to Tetra Dispatch, newest first.
 
-## Unreleased
+## 1.3.1
 
 - **Several operators.** Accounts under `[dispatch.operators.<name>]`
   (`password`, `issi`, `role`, optional `groups` and `tx_group`) give each
