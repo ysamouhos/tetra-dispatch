@@ -1,6 +1,7 @@
 //! Tetra Dispatch: a browser TETRA dispatch console that logs straight into a
 //! brew-server as a Brew client, with its own operator ISSI.
 
+mod accounts;
 mod brew_link;
 mod codec;
 mod config;
