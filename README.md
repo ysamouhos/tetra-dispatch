@@ -29,8 +29,11 @@ stays where it is, for cell-local dispatch without a Brew network.
   recording start/stop, play, download and delete go to the activity log.
 - **HTTPS console**: optional built-in TLS (`[web] tls`), so browsers allow the
   microphone without a reverse proxy.
-- **One operator at a time**: one browser takes the operator position. Other
-  browsers can watch the same status, activity and SDS log.
+- **One operator, or several**: by default one browser takes the operator
+  position and the others watch. With operator accounts configured, each
+  operator logs in and works their own seat (own ISSI, talkgroups, calls and
+  PTT) at the same time over the one brew-server link. See
+  [Several operators](#several-operators).
 
 Audio is ACELP. The reference ETSI codec is vendored in
 `third_party/tetra-codec/` and compiled by `build.rs`. The browser sends and
@@ -80,20 +83,83 @@ Choose one that no radio uses.
 If the brew-server uses TLS with a self-signed certificate, set `tls = true`
 and `tls_pinned_cert_path` to a copy of its `server.crt`.
 
+## Several operators
+
+Without accounts the console is a single operator position: `[dispatch]
+operator_issi` is the one identity on the network, `[web] password` (HTTP
+Basic) guards the page, and the first browser to take the position holds it.
+
+Add accounts under `[dispatch.operators]` and the console becomes
+multi-seat:
+
+```toml
+[dispatch.operators.dave]
+password = "secret"
+issi = 9990001          # this operator's ISSI on the network; unique per operator
+role = "admin"          # admin | operator | viewer   (default operator)
+groups = [91, 92]       # optional: initial listen list (default: [dispatch] groups)
+tx_group = 91           # optional (default: first of groups)
+
+[dispatch.operators.sue]
+password = "another"
+issi = 9990002
+```
+
+- The page asks for a name and password. A session cookie (`HttpOnly`,
+  `SameSite=Strict`, kept in memory, so a restart logs everyone out) binds
+  the browser to its account; there is a Log out button. `[web] password` is
+  ignored, with a warning at start.
+- Every account with a seat registers its own ISSI on the brew-server when
+  the link comes up (and again after a reconnect) and affiliates its own
+  talkgroups under it. Radios call and message an operator by their ISSI.
+- A received group call is played on every seat that listens to that group;
+  emergency calls reach every seat. A private call rings on the seat that owns
+  the called ISSI, and is rejected with "not reachable" when nobody holds it.
+  PTT transmits with the seat's ISSI on the seat's TX group: two operators
+  may talk on different groups at once; on the same group brew-server's
+  one-talker rule applies and the press-again-to-pre-empt logic works per
+  seat. Since brew-server does not echo a connection's own transmission, an
+  operator's voice is handed to the other seats listening to that group by
+  the console itself.
+- SDS is sent from the seat's ISSI; SDS to an operator's ISSI is shown with
+  their name. `[dispatch] operator_issi` stays registered as a shared console
+  identity (unless an account uses it), so SDS sent to the old single ISSI
+  still arrives.
+- Within one account several browsers may be open: the first to take the seat
+  holds it, the others watch it, as before. Activity and SDS log entries say
+  which operator caused them, and server recordings are per seat.
+- `viewer` watches everything (status, activity, SDS, map, recordings) but
+  has no seat and cannot command. `admin` additionally manages accounts from
+  the Operators card: an added account registers on the network at once, a
+  removed one is deregistered and its browsers are logged out, and the change
+  is written back to the config file (only the `dispatch.operators` table is
+  rewritten; the file is replaced atomically). The last admin cannot be
+  removed or demoted, nor can an admin remove their own account.
+
+The same is available over HTTP for scripts, with the session cookie:
+`GET /api/operators` (no passwords), `POST /api/operators/<name>` with
+`{"password", "issi", "role", "groups", "tx_group"}` (password optional when
+updating), `DELETE /api/operators/<name>`.
+
 ## Layout
 
 | File | Role |
 |---|---|
 | `src/brew_link.rs` | Discovery, Digest auth, WebSocket, keepalive and redial |
 | `src/protocol.rs` | Brew wire format (shared with bost-flowstation's `net_brew`) |
-| `src/dispatcher.rs` | Registration, affiliations, group/private calls, SDS, operator position |
+| `src/dispatcher.rs` | Registration, affiliations, group/private calls, SDS, operator seats |
+| `src/accounts.rs` | Operator accounts: login sessions, runtime add/remove, config file rewrite |
 | `src/codec.rs` | PCM ↔ ACELP and the 36-byte STE traffic payload |
 | `src/sds.rs` | SDS text encode/decode |
 | `src/recording.rs` | Server-side WAV recordings: file names, writer, listing |
-| `src/web.rs` | Console HTTP and WebSocket (JSON commands, binary PCM), recordings download |
+| `src/web.rs` | Console HTTP and WebSocket (JSON commands, binary PCM), login, account API, recordings download |
 | `static/index.html` | The console (ES/EN, light/dark) |
 | `sample/tetra-dispatch.toml` | Example configuration |
 
 ```bash
 cargo test
 ```
+
+## Credits
+
+- David Harcus MM7FDM

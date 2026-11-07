@@ -31,6 +31,22 @@ ambience_password = ""
 # Where server-side voice recordings (WAV) are stored.
 recordings_dir = "recordings"
 
+# Operator accounts. Leave out for a single operator position (the first
+# browser to take it) guarded by [web] password. With accounts, the console
+# asks for a name and password, every operator has their own seat (ISSI,
+# talkgroups, calls, PTT) and [web] password is ignored. Admins can add and
+# remove accounts from the console; the change is written back here.
+# [dispatch.operators.dave]
+# password = "secret"
+# issi = 9990001          # this operator's ISSI on the network; unique per operator
+# role = "admin"          # admin | operator | viewer   (default operator)
+# groups = [91, 92]       # optional: initial listen list (default: [dispatch] groups)
+# tx_group = 91           # optional (default: first of groups)
+#
+# [dispatch.operators.sue]
+# password = "another"
+# issi = 9990002
+
 [web]
 # Browsers allow the microphone only on https:// or http://localhost: enable
 # `tls` (or use a TLS reverse proxy) for use from other machines.
@@ -43,4 +59,5 @@ tls = false
 # tls_cert_path = "/etc/tetra-dispatch/cert.pem"
 # tls_key_path = "/etc/tetra-dispatch/key.pem"
 # Optional console password (HTTP Basic, any user name). Empty = open.
+# Ignored when [dispatch.operators] accounts are configured.
 password = ""
